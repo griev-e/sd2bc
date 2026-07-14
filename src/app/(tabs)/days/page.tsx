@@ -23,10 +23,12 @@ import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
 import { IconGrip, IconMoon, IconPlus, IconSparkle, IconTrash } from "@/components/Icons";
+import Sheet from "@/components/Sheet";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
+import { dayEmoji, NATURE_EMOJI } from "@/lib/emoji";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
 import { type StopSchedule, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
@@ -137,6 +139,7 @@ function DayCard({
   const reorderStops = useTrip((s) => s.reorderStops);
   const deleteDay = useTrip((s) => s.deleteDay);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const setSelectedDay = useTrip((s) => s.setSelectedDay);
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
 
@@ -195,20 +198,22 @@ function DayCard({
 
   return (
     <section className="card p-4">
-      <button
-        className="flex w-full items-center justify-between text-left"
-        onClick={() => {
-          setSelectedDay(day.id);
-          router.push("/map");
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <span
-            className="mono flex h-9 w-9 items-center justify-center rounded-lg border border-hairline bg-bg-elevated text-[11px] font-semibold"
-            style={{ color }}
-          >
-            {String(day.seq).padStart(2, "0")}
-          </span>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setEmojiOpen(true)}
+          aria-label={`Change Day ${day.seq} icon`}
+          className="pressable flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border bg-bg-elevated text-lg leading-none"
+          style={{ borderColor: color }}
+        >
+          {dayEmoji(day.id, day.emoji)}
+        </button>
+        <button
+          className="flex flex-1 items-center justify-between text-left"
+          onClick={() => {
+            setSelectedDay(day.id);
+            router.push("/map");
+          }}
+        >
           <div>
             <p className="text-sm font-semibold leading-tight tracking-tight">
               {day.title || `Day ${day.seq}`}
@@ -225,18 +230,22 @@ function DayCard({
               )}
             </p>
           </div>
-        </div>
-        <div className="text-right">
-          {route && route.distanceM > 0 ? (
-            <>
-              <p className="mono text-xs font-semibold text-fg-muted">{fmtMiles(route.distanceM)}</p>
-              <p className="mono mt-0.5 text-[10px] text-fg-faint">{fmtDuration(route.durationS)}</p>
-            </>
-          ) : (
-            <span className="text-xs text-fg-faint">—</span>
-          )}
-        </div>
-      </button>
+          <div className="text-right">
+            {route && route.distanceM > 0 ? (
+              <>
+                <p className="mono text-xs font-semibold text-fg-muted">
+                  {fmtMiles(route.distanceM)}
+                </p>
+                <p className="mono mt-0.5 text-[10px] text-fg-faint">
+                  {fmtDuration(route.durationS)}
+                </p>
+              </>
+            ) : (
+              <span className="text-xs text-fg-faint">—</span>
+            )}
+          </div>
+        </button>
+      </div>
 
       {(morningSeg || dayStops.length > 0) && <div className="hairline-t mt-3.5" />}
 
@@ -314,7 +323,79 @@ function DayCard({
           {confirmDelete ? "Sure?" : <IconTrash size={14} />}
         </button>
       </div>
+
+      <DayEmojiSheet day={day} open={emojiOpen} onClose={() => setEmojiOpen(false)} />
     </section>
+  );
+}
+
+/** Bottom sheet to pick or clear a day's badge emoji. */
+function DayEmojiSheet({
+  day,
+  open,
+  onClose,
+}: {
+  day: Day;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const updateDay = useTrip((s) => s.updateDay);
+  const [custom, setCustom] = useState("");
+
+  return (
+    <Sheet open={open} onClose={onClose} title={`${day.title || `Day ${day.seq}`} icon`}>
+      <div className="grid grid-cols-6 gap-2">
+        {NATURE_EMOJI.map((e) => (
+          <button
+            key={e}
+            onClick={() => {
+              void updateDay(day.id, { emoji: e });
+              onClose();
+            }}
+            className={`pressable flex h-12 items-center justify-center rounded-xl text-2xl ${
+              day.emoji === e ? "bg-accent-soft ring-1 ring-accent" : "bg-fg/[0.03]"
+            }`}
+          >
+            {e}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4">
+        <p className="eyebrow mb-2 px-0.5">Or type any emoji</p>
+        <div className="flex gap-2">
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            placeholder="🌈"
+            maxLength={8}
+            className="field flex-1 text-center text-xl"
+            aria-label="Custom emoji"
+          />
+          <button
+            disabled={!custom.trim()}
+            onClick={() => {
+              void updateDay(day.id, { emoji: custom.trim() });
+              setCustom("");
+              onClose();
+            }}
+            className="btn-primary pressable rounded-xl px-5 text-sm font-semibold disabled:opacity-40"
+          >
+            Set
+          </button>
+        </div>
+      </div>
+
+      <button
+        onClick={() => {
+          void updateDay(day.id, { emoji: null });
+          onClose();
+        }}
+        className="btn-ghost pressable mt-4 h-11 w-full rounded-xl text-sm font-semibold"
+      >
+        Reset to default
+      </button>
+    </Sheet>
   );
 }
 

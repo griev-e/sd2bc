@@ -68,6 +68,10 @@ export interface SeedInputs {
   totalDays: number;
   /** one entry per overnight stay */
   nights: { region: Region; bigCity: boolean; free?: boolean; cost?: number | null }[];
+  /** food $/person/day — trip override or {@link FOOD_PER_PERSON_DAY}. */
+  foodPerDay: number;
+  /** activities $/person/day — trip override or {@link ACTIVITIES_PER_PERSON_DAY}. */
+  activitiesPerDay: number;
 }
 
 /** Cost of a single night: $0 if free, actual cost if known, else regional estimate. */
@@ -95,9 +99,9 @@ export function seedEstimate(cat: ExpenseCategory, s: SeedInputs): number {
     case "lodging":
       return s.nights.reduce((sum, n) => sum + nightCost(n), 0);
     case "food":
-      return FOOD_PER_PERSON_DAY * s.travelers * s.totalDays;
+      return s.foodPerDay * s.travelers * s.totalDays;
     case "activities":
-      return ACTIVITIES_PER_PERSON_DAY * s.travelers * s.totalDays;
+      return s.activitiesPerDay * s.travelers * s.totalDays;
     case "misc":
       return MISC_PER_DAY * s.totalDays;
   }

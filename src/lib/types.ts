@@ -24,6 +24,10 @@ export interface Trip {
   start_date: string;
   mpg: number;
   travelers: number;
+  /** Override for food $/person/day; null = use the regional seed default. */
+  food_per_day: number | null;
+  /** Override for activities $/person/day; null = use the seed default. */
+  activities_per_day: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -35,6 +39,8 @@ export interface Day {
   date: string;
   title: string;
   notes: string;
+  /** Custom emoji for the day badge; null = a deterministic nature default. */
+  emoji: string | null;
   created_at: string;
   updated_at: string;
 }
