@@ -25,7 +25,8 @@ type Tables =
   | "expenses"
   | "packing_items"
   | "trips"
-  | "game_events";
+  | "game_events"
+  | "profiles";
 
 interface TripState {
   loaded: boolean;
@@ -76,6 +77,9 @@ interface TripState {
 
   // trip settings
   updateTrip: (patch: Partial<Trip>) => Promise<void>;
+
+  // profile (display name / photo)
+  updateProfile: (patch: Partial<Pick<Profile, "display_name" | "avatar_url">>) => Promise<void>;
 
   // expenses
   addExpense: (e: {
@@ -263,6 +267,9 @@ export const useTrip = create<TripState>((set, get) => {
       case "game_events":
         set({ gameEvents: upsert(s.gameEvents) });
         break;
+      case "profiles":
+        set({ profiles: upsert(s.profiles) });
+        break;
       case "trips":
         if (evt !== "DELETE") set({ trip: { ...(s.trip ?? {}), ...row } as Trip });
         break;
@@ -332,6 +339,7 @@ export const useTrip = create<TripState>((set, get) => {
           "expenses",
           "packing_items",
           "game_events",
+          "profiles",
         ];
         for (const table of tables) {
           channel.on(
@@ -377,6 +385,8 @@ export const useTrip = create<TripState>((set, get) => {
         lodging_url: null,
         lodging_free: false,
         lodging_cost: null,
+        start_time: null,
+        duration_min: null,
         created_by: s.userId,
         updated_by: s.userId,
         created_at: now,
@@ -556,6 +566,15 @@ export const useTrip = create<TripState>((set, get) => {
       if (!trip) return;
       set({ trip: { ...trip, ...patch } });
       await supabase().from("trips").update(patch).eq("id", trip.id);
+    },
+
+    updateProfile: async (patch) => {
+      const s = get();
+      if (!s.userId) return;
+      set({
+        profiles: s.profiles.map((p) => (p.id === s.userId ? { ...p, ...patch } : p)),
+      });
+      await supabase().from("profiles").update(patch).eq("id", s.userId);
     },
 
     addExpense: async (e) => {

@@ -20,6 +20,7 @@ interface MapViewProps {
 type StyleMode = "street" | "satellite";
 
 const STYLE_PREF_KEY = "coastline-map-style";
+const SHOW_VIAS_KEY = "coastline-show-vias";
 
 /** Route source + line layers — added on load and re-added after setStyle. */
 function addRouteLayers(map: MLMap, mode: StyleMode, dark: boolean) {
@@ -66,10 +67,25 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   );
   // bumped after every style swap so data-dependent effects re-apply
   const [styleEpoch, setStyleEpoch] = useState(0);
+  // shaping points stay hidden until asked for (or one is being placed)
+  const [showVias, setShowVias] = useState<boolean>(
+    () => typeof window !== "undefined" && localStorage.getItem(SHOW_VIAS_KEY) === "1",
+  );
+
+  function setShowViasPref(v: boolean) {
+    setShowVias(v);
+    if (!v) setSelectedVia(null); // no hidden marker should keep its delete pill
+    localStorage.setItem(SHOW_VIAS_KEY, v ? "1" : "0");
+  }
 
   // Stable identities for callbacks used inside the one-shot map init effect.
   const fireLongPress = useEffectEvent((lngLat: LngLat) => onLongPress?.(lngLat));
   const fireSelectStop = useEffectEvent((stop: Stop) => onSelectStop(stop));
+  // placing a shaping point reveals the handles so it can be dragged
+  const fireRouteTap = useEffectEvent((dayId: string, lngLat: LngLat) => {
+    void insertShapingPoint(dayId, lngLat);
+    setShowViasPref(true);
+  });
 
   const days = useTrip((s) => s.days);
   const stops = useTrip((s) => s.stops);
@@ -115,7 +131,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         const feature = e.features?.[0];
         if (!feature) return;
         const dayId = feature.properties?.dayId as string;
-        void insertShapingPoint(dayId, [e.lngLat.lng, e.lngLat.lat]);
+        fireRouteTap(dayId, [e.lngLat.lng, e.lngLat.lat]);
         e.preventDefault();
       });
       map.on("mouseenter", "route-line", () => (map.getCanvas().style.cursor = "pointer"));
@@ -192,6 +208,14 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     setStyleMode(next);
     localStorage.setItem(STYLE_PREF_KEY, next);
     const dark = effectiveDark();
+    // setStyle wipes sources/layers; rebuild them once the new style is in.
+    // Listen BEFORE calling setStyle — inline style objects (satellite) can
+    // finish loading synchronously, so a later .once() would miss the event
+    // and the route line would vanish until the map remounts.
+    map.once("style.load", () => {
+      addRouteLayers(map, next, dark);
+      setStyleEpoch((e) => e + 1);
+    });
     map.setStyle(
       next === "satellite"
         ? (MAP_STYLE_SATELLITE as StyleSpecification)
@@ -199,11 +223,6 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
           ? MAP_STYLE_DARK
           : MAP_STYLE_LIGHT,
     );
-    // setStyle wipes sources/layers; rebuild them once the new style is in
-    map.once("style.load", () => {
-      addRouteLayers(map, next, dark);
-      setStyleEpoch((e) => e + 1);
-    });
   }, [styleMode]);
 
   // ---- stop markers -----------------------------------------------------------
@@ -254,6 +273,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
     for (const [, m] of viaMarkers.current) m.remove();
     viaMarkers.current.clear();
+    if (!showVias) return;
 
     for (const via of viaPoints) {
       const el = document.createElement("div");
@@ -272,7 +292,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       viaMarkers.current.set(via.id, marker);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viaPoints, mapReady]);
+  }, [viaPoints, mapReady, showVias]);
 
   // ---- camera -------------------------------------------------------------------
   const fitTrip = useCallback(() => {
@@ -362,6 +382,25 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         }`}
       >
         <IconLayers size={18} strokeWidth={1.7} />
+      </button>
+
+      {/* show / hide route-shaping handles */}
+      <button
+        onClick={() => setShowViasPref(!showVias)}
+        aria-label={showVias ? "Hide shaping points" : "Show shaping points"}
+        className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+222px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
+          showVias ? "text-accent" : "text-fg-muted"
+        }`}
+      >
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <path
+            d="M2 14c3.5 0 3-8.5 7-8.5 2.6 0 3.4 3.4 7 3.2"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+          />
+          <circle cx="9" cy="5.5" r="2.4" fill="var(--bg-elevated)" stroke="currentColor" strokeWidth="1.7" />
+        </svg>
       </button>
 
       {/* shaping point delete pill */}

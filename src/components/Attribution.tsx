@@ -15,6 +15,18 @@ export default function AttributionDot({
   if (!userId) return null;
   const p = profiles.find((x) => x.id === userId);
   if (!p) return null;
+  if (p.avatar_url) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={p.avatar_url}
+        alt={displayName(p) ?? ""}
+        title={displayName(p)}
+        className="inline-block flex-shrink-0 rounded-full object-cover"
+        style={{ width: size, height: size, boxShadow: `0 0 0 1.5px ${p.color}` }}
+      />
+    );
+  }
   return (
     <span
       title={displayName(p)}

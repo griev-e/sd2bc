@@ -14,6 +14,7 @@ export interface Profile {
   username: string;
   display_name: string | null;
   color: string;
+  avatar_url: string | null;
   created_at: string;
 }
 
@@ -55,6 +56,10 @@ export interface Stop {
   lodging_free: boolean;
   /** Known actual nightly cost; overrides the regional estimate. */
   lodging_cost: number | null;
+  /** Scheduled local time "HH:MM" (24h), e.g. a departure or reservation. */
+  start_time: string | null;
+  /** Planned length of stay in minutes; null = just a point in time. */
+  duration_min: number | null;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;

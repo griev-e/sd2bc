@@ -26,7 +26,7 @@ import { IconGrip, IconMoon, IconPlus, IconSparkle, IconTrash } from "@/componen
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
-import { fmtClock, fmtDate, fmtDuration, fmtMiles } from "@/lib/format";
+import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay, fmtTimeOfDay } from "@/lib/format";
 import { stopsForDay, useTrip } from "@/lib/store";
 import { useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
@@ -347,7 +347,16 @@ function SortableStop({
             )}
           </p>
           <p className="tnum mt-0.5 text-[11px] text-fg-faint">
-            {arrival !== undefined ? `~${fmtClock(arrival)}` : "departure"}
+            {stop.start_time ? (
+              <span className="font-semibold text-accent">
+                {fmtTimeOfDay(stop.start_time)}
+                {stop.duration_min ? ` · ${fmtStay(stop.duration_min)}` : ""}
+              </span>
+            ) : arrival !== undefined ? (
+              `~${fmtClock(arrival)}`
+            ) : (
+              "departure"
+            )}
             {stop.notes && " · note"}
           </p>
         </div>

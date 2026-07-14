@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
+import { IconCamera } from "@/components/Icons";
 import { displayName } from "@/lib/format";
 import { useTrip } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
 import {
+  ACCENTS,
+  getAccentPref,
   getThemePref,
+  serverAccentPref,
   serverThemePref,
+  setAccentPref,
   setThemePref,
   themeSubscribe,
   type ThemePref,
@@ -26,6 +31,7 @@ export default function MorePage() {
   const me = profiles.find((p) => p.id === userId);
   const partner = profiles.find((p) => p.id !== userId);
   const theme = useSyncExternalStore(themeSubscribe, getThemePref, serverThemePref);
+  const accent = useSyncExternalStore(themeSubscribe, getAccentPref, serverAccentPref);
 
   useEffect(() => {
     void refreshActivity();
@@ -52,6 +58,9 @@ export default function MorePage() {
       </header>
 
       <div className="space-y-4 px-4 pt-4">
+        {/* your profile */}
+        {me && <ProfileCard profile={me} />}
+
         {/* appearance */}
         <section className="card p-5">
           <p className="eyebrow mb-3">Appearance</p>
@@ -74,30 +83,45 @@ export default function MorePage() {
               </button>
             ))}
           </div>
+
+          <p className="eyebrow mb-3 mt-5">Theme color</p>
+          <div className="flex items-center justify-between px-1">
+            {ACCENTS.map((a) => (
+              <button
+                key={a.key}
+                onClick={() => setAccentPref(a.key)}
+                aria-label={a.label}
+                title={a.label}
+                className="pressable flex h-11 w-11 items-center justify-center rounded-full"
+                style={
+                  accent === a.key
+                    ? { boxShadow: "0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--fg-muted)" }
+                    : undefined
+                }
+              >
+                <span
+                  className="block h-8 w-8 rounded-full"
+                  style={{ background: a.swatch }}
+                />
+              </button>
+            ))}
+          </div>
+          <p className="mt-2.5 text-center text-[11px] text-fg-faint">
+            {ACCENTS.find((a) => a.key === accent)?.label}
+          </p>
         </section>
 
         {/* crew */}
         <section className="card p-5">
           <p className="eyebrow mb-3">Crew</p>
           <div className="space-y-3">
-            {me && (
-              <div className="flex items-center gap-3">
-                <AttributionDot userId={me.id} size={28} />
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{displayName(me)}</p>
-                  <p className="text-xs text-fg-faint">you</p>
-                </div>
+            {[me, partner].filter(Boolean).map((p) => (
+              <div key={p!.id} className="flex items-center gap-3">
+                <AttributionDot userId={p!.id} size={30} />
+                <p className="text-sm font-medium">{displayName(p!)}</p>
               </div>
-            )}
-            {partner ? (
-              <div className="flex items-center gap-3">
-                <AttributionDot userId={partner.id} size={28} />
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{displayName(partner)}</p>
-                  <p className="text-xs text-fg-faint">co-pilot</p>
-                </div>
-              </div>
-            ) : (
+            ))}
+            {!partner && (
               <p className="rounded-2xl bg-accent-soft p-3 text-xs leading-5 text-fg-muted">
                 Your co-pilot&apos;s seat is ready — she just needs to sign in on
                 her phone and everything syncs live.
@@ -156,5 +180,120 @@ export default function MorePage() {
         </button>
       </div>
     </div>
+  );
+}
+
+/** Edit your own display name + photo; syncs live to the other phone. */
+function ProfileCard({ profile }: { profile: { id: string; username: string; display_name: string | null; color: string; avatar_url: string | null } }) {
+  const updateProfile = useTrip((s) => s.updateProfile);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState(profile.display_name ?? "");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  function commitName() {
+    const next = name.trim();
+    if (next && next !== (profile.display_name ?? "")) {
+      void updateProfile({ display_name: next });
+    }
+  }
+
+  async function pickPhoto(file: File) {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      // downscale to a 256px square so uploads are tiny and load fast
+      const bmp = await createImageBitmap(file);
+      const side = Math.min(bmp.width, bmp.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 256;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(
+        bmp,
+        (bmp.width - side) / 2,
+        (bmp.height - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        256,
+        256,
+      );
+      const blob = await new Promise<Blob | null>((res) =>
+        canvas.toBlob(res, "image/jpeg", 0.85),
+      );
+      if (!blob) throw new Error("no blob");
+
+      const db = supabase();
+      const path = `${profile.id}.jpg`;
+      const { error } = await db.storage
+        .from("avatars")
+        .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+      if (error) throw error;
+      const { data } = db.storage.from("avatars").getPublicUrl(path);
+      // cache-buster so the new photo shows immediately everywhere
+      await updateProfile({ avatar_url: `${data.publicUrl}?v=${Date.now()}` });
+    } catch {
+      setUploadError("Couldn't upload that photo — try another one.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <section className="card p-5">
+      <p className="eyebrow mb-3">Your profile</p>
+      <div className="flex items-center gap-4">
+        <button
+          onClick={() => fileRef.current?.click()}
+          aria-label="Change profile photo"
+          className="pressable relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-full"
+          style={{ background: profile.color }}
+        >
+          {profile.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profile.avatar_url}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-xl font-bold uppercase text-white">
+              {(profile.display_name ?? profile.username).slice(0, 1)}
+            </span>
+          )}
+          <span className="absolute inset-x-0 bottom-0 flex h-5 items-center justify-center bg-black/45 text-white">
+            {uploading ? (
+              <span className="text-[9px] font-semibold">…</span>
+            ) : (
+              <IconCamera size={11} strokeWidth={2.2} />
+            )}
+          </span>
+        </button>
+        <div className="min-w-0 flex-1">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={commitName}
+            placeholder="display name"
+            className="field"
+            aria-label="Display name"
+          />
+          <p className="mt-1.5 px-1 text-[11px] text-fg-faint">@{profile.username}</p>
+        </div>
+      </div>
+      {uploadError && <p className="mt-2 text-xs text-danger">{uploadError}</p>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void pickPhoto(f);
+          e.target.value = "";
+        }}
+      />
+    </section>
   );
 }

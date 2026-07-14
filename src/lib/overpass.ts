@@ -87,10 +87,13 @@ export async function suggestAlongRoute(
 
   // proxied through our own API route — Overpass rejects browser requests
   // that can't send a descriptive User-Agent
+  // give up client-side after 50s so the UI can offer a retry instead of
+  // spinning forever
   const res = await fetch(OVERPASS_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(50000),
   });
   if (!res.ok) throw new Error(`Overpass ${res.status}`);
   const json = await res.json();

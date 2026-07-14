@@ -320,3 +320,21 @@ export function IconLink({ size = 18, className, strokeWidth = 1.8 }: IconProps)
     </svg>
   );
 }
+
+export function IconClock({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2" />
+    </svg>
+  );
+}
+
+export function IconSearch({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m15.8 15.8 4.2 4.2" />
+    </svg>
+  );
+}
