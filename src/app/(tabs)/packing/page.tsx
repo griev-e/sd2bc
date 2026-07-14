@@ -9,6 +9,15 @@ import { useTrip } from "@/lib/store";
 
 type AssignFilter = "all" | "me" | "partner" | "shared";
 
+const CATEGORY_DOT = [
+  "var(--accent)",
+  "var(--coral)",
+  "var(--gold)",
+  "var(--sky)",
+  "var(--violet)",
+  "var(--indigo)",
+];
+
 export default function PackingPage() {
   const packing = useTrip((s) => s.packing);
   const profiles = useTrip((s) => s.profiles);
@@ -61,7 +70,7 @@ export default function PackingPage() {
               <p className="eyebrow">
                 {done}/{packing.length} packed
               </p>
-              <h1 className="mt-0.5 text-xl font-bold tracking-tight">Packing</h1>
+              <h1 className="display mt-0.5 text-[22px] tracking-tight">Packing</h1>
             </div>
             <CountdownPill />
           </div>
@@ -113,9 +122,15 @@ export default function PackingPage() {
         </div>
 
         <div className="space-y-3.5">
-          {groups.map(([category, items]) => (
+          {groups.map(([category, items], gi) => (
             <section key={category} className="card p-4">
-              <p className="eyebrow mb-2 px-1">{category}</p>
+              <p className="eyebrow mb-2 flex items-center gap-1.5 px-1">
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: CATEGORY_DOT[gi % CATEGORY_DOT.length] }}
+                />
+                {category}
+              </p>
               <div>
                 {items.map((item) => (
                   <label

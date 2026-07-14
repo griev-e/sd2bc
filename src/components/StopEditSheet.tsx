@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Sheet from "./Sheet";
 import AttributionDot from "./Attribution";
 import { StopKindIcon } from "./CategoryIcon";
+import { KIND_COLOR } from "@/lib/colors";
 import { useTrip } from "@/lib/store";
 import { fmtDate } from "@/lib/format";
 import type { Stop, StopKind } from "@/lib/types";
@@ -77,20 +78,27 @@ function StopForm({ stop, onClose }: { stop: Stop; onClose: () => void }) {
       <div>
         <p className="eyebrow mb-2 px-0.5">Type</p>
         <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
-          {KIND_META.map((k) => (
-            <button
-              key={k.key}
-              onClick={() => void updateStop(stop.id, { kind: k.key })}
-              className={`pressable flex flex-shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium ${
-                stop.kind === k.key
-                  ? "btn-primary"
-                  : "border border-hairline text-fg-muted"
-              }`}
-            >
-              <StopKindIcon kind={k.key} size={14} />
-              {k.label}
-            </button>
-          ))}
+          {KIND_META.map((k) => {
+            const active = stop.kind === k.key;
+            const color = KIND_COLOR[k.key];
+            return (
+              <button
+                key={k.key}
+                onClick={() => void updateStop(stop.id, { kind: k.key })}
+                className={`pressable flex flex-shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium ${
+                  active ? "font-semibold" : "border border-hairline text-fg-muted"
+                }`}
+                style={
+                  active
+                    ? { background: color.bg, color: color.fg, border: `1px solid ${color.fg}` }
+                    : undefined
+                }
+              >
+                <StopKindIcon kind={k.key} size={14} />
+                {k.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 

@@ -9,7 +9,7 @@ export const SUPABASE_ANON_KEY =
   "sb_publishable__Xv-ME9hUoGy68Ezv1q56g_93_1Tc7a";
 
 export const OSRM_URL = "https://router.project-osrm.org";
-export const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+export const OVERPASS_URL = "/api/overpass";
 export const NOMINATIM_URL = "https://nominatim.openstreetmap.org";
 
 export const MAP_STYLE_LIGHT = "https://tiles.openfreemap.org/styles/positron";

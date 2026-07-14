@@ -38,7 +38,7 @@ export default function MorePage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="eyebrow">Settings</p>
-              <h1 className="mt-0.5 text-xl font-bold tracking-tight">More</h1>
+              <h1 className="display mt-0.5 text-[22px] tracking-tight">More</h1>
             </div>
             <CountdownPill />
           </div>
