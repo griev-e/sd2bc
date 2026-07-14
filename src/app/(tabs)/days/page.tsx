@@ -22,7 +22,7 @@ import AddStopSheet from "@/components/AddStopSheet";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
-import { IconGrip, IconMoon, IconPlus, IconSparkle } from "@/components/Icons";
+import { IconGrip, IconMoon, IconPlus, IconSparkle, IconTrash } from "@/components/Icons";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
@@ -38,6 +38,7 @@ export default function DaysPage() {
   const days = useTrip((s) => s.days);
   const routes = useTrip((s) => s.routes);
   const routesPending = useTrip((s) => s.routesPending);
+  const addDay = useTrip((s) => s.addDay);
 
   const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
 
@@ -90,6 +91,13 @@ export default function DaysPage() {
             onSuggest={() => setSuggestForDay(day.id)}
           />
         ))}
+
+        <button
+          onClick={() => void addDay()}
+          className="btn-ghost pressable flex h-12 w-full items-center justify-center gap-1.5 rounded-2xl text-sm font-semibold"
+        >
+          <IconPlus size={14} /> Add day {orderedDays.length + 1}
+        </button>
       </div>
 
       <StopEditSheet stop={editStop} open={editStop !== null} onClose={() => setEditStop(null)} />
@@ -129,6 +137,8 @@ function DayCard({
   const stops = useTrip((s) => s.stops);
   const weather = useWeather((s) => s.byDay[day.id]);
   const reorderStops = useTrip((s) => s.reorderStops);
+  const deleteDay = useTrip((s) => s.deleteDay);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const setSelectedDay = useTrip((s) => s.setSelectedDay);
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
 
@@ -266,6 +276,23 @@ function DayCard({
           className="pressable flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent-soft py-2.5 text-xs font-semibold text-accent"
         >
           <IconSparkle size={13} /> Suggest nearby
+        </button>
+        <button
+          onClick={() => {
+            if (confirmDelete) void deleteDay(day.id);
+            else {
+              setConfirmDelete(true);
+              setTimeout(() => setConfirmDelete(false), 2500);
+            }
+          }}
+          aria-label={`Remove day ${day.seq}`}
+          className={`pressable flex min-h-[38px] items-center justify-center rounded-xl text-xs font-semibold transition-all ${
+            confirmDelete
+              ? "bg-danger px-3 text-white"
+              : "btn-ghost w-10 flex-shrink-0 !text-fg-faint"
+          }`}
+        >
+          {confirmDelete ? "Sure?" : <IconTrash size={14} />}
         </button>
       </div>
     </section>

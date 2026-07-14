@@ -296,3 +296,19 @@ export function IconTimer({ size = 18, className, strokeWidth = 1.8 }: IconProps
     </svg>
   );
 }
+
+export function IconTrash({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M4.5 6.5h15M9.5 6.5V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.5m-8 0 .8 12A2 2 0 0 0 9.3 20.5h5.4a2 2 0 0 0 2-1.9l.8-12.1M10 10.5v6m4-6v6" />
+    </svg>
+  );
+}
+
+export function IconChevronDown({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="m6 9.5 6 6 6-6" />
+    </svg>
+  );
+}

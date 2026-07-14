@@ -51,6 +51,13 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} antialiased`}
       >
+        {/* apply the saved theme before first paint to avoid a flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              '(function(){try{var t=localStorage.getItem("coastline-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}})()',
+          }}
+        />
         {children}
       </body>
     </html>

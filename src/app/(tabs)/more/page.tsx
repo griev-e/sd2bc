@@ -1,17 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
-import { displayName, fmtDate } from "@/lib/format";
+import { displayName } from "@/lib/format";
 import { useTrip } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
+import {
+  getThemePref,
+  serverThemePref,
+  setThemePref,
+  themeSubscribe,
+  type ThemePref,
+} from "@/lib/theme";
 
 export default function MorePage() {
   const router = useRouter();
-  const trip = useTrip((s) => s.trip);
-  const days = useTrip((s) => s.days);
   const profiles = useTrip((s) => s.profiles);
   const userId = useTrip((s) => s.userId);
   const activity = useTrip((s) => s.activity);
@@ -20,6 +25,7 @@ export default function MorePage() {
 
   const me = profiles.find((p) => p.id === userId);
   const partner = profiles.find((p) => p.id !== userId);
+  const theme = useSyncExternalStore(themeSubscribe, getThemePref, serverThemePref);
 
   useEffect(() => {
     void refreshActivity();
@@ -46,15 +52,28 @@ export default function MorePage() {
       </header>
 
       <div className="space-y-4 px-4 pt-4">
-        {/* trip card */}
+        {/* appearance */}
         <section className="card p-5">
-          <p className="text-lg font-bold tracking-tight">{trip?.name ?? "Coastline"}</p>
-          <p className="mt-1 text-sm text-fg-muted">
-            {trip && fmtDate(trip.start_date)}
-            {days.length > 0 &&
-              ` → ${fmtDate([...days].sort((a, b) => a.seq - b.seq)[days.length - 1].date)}`}
-            {` · ${days.length} days`}
-          </p>
+          <p className="eyebrow mb-3">Appearance</p>
+          <div className="flex gap-1.5">
+            {(
+              [
+                ["system", "Auto"],
+                ["light", "Light"],
+                ["dark", "Dark"],
+              ] as [ThemePref, string][]
+            ).map(([pref, label]) => (
+              <button
+                key={pref}
+                onClick={() => setThemePref(pref)}
+                className={`pressable flex-1 rounded-xl py-2.5 text-xs font-semibold ${
+                  theme === pref ? "btn-primary" : "border border-hairline text-fg-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </section>
 
         {/* crew */}

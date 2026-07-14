@@ -1,20 +1,27 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import CountdownPill from "@/components/CountdownPill";
 import { ExpenseCategoryIcon } from "@/components/CategoryIcon";
+import { IconChevronDown } from "@/components/Icons";
 import { EXPENSE_COLOR } from "@/lib/colors";
 import {
+  ACTIVITIES_PER_PERSON_DAY,
+  BIG_CITY_BUMP,
+  BIG_CITY_PATTERN,
   CATEGORY_LABEL,
   CATEGORIES,
+  FOOD_PER_PERSON_DAY,
   GAS_PRICE_USD_PER_GAL,
-  BIG_CITY_PATTERN,
-  projectCategory,
+  LODGING_PER_NIGHT,
+  MISC_PER_DAY,
+  seedEstimate,
   type SeedInputs,
 } from "@/lib/costs";
-import { fmtMoney } from "@/lib/format";
+import { fmtMiles, fmtMoney } from "@/lib/format";
 import { regionOf, type Region } from "@/lib/geo";
 import { useTrip } from "@/lib/store";
+import type { DayRoute, ExpenseCategory, Stop } from "@/lib/types";
 
 export default function BudgetPage() {
   const trip = useTrip((s) => s.trip);
@@ -22,6 +29,12 @@ export default function BudgetPage() {
   const stops = useTrip((s) => s.stops);
   const routes = useTrip((s) => s.routes);
   const updateTrip = useTrip((s) => s.updateTrip);
+
+  const [openCat, setOpenCat] = useState<ExpenseCategory | null>(null);
+
+  const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
+  const mpg = trip?.mpg ?? 28;
+  const travelers = trip?.travelers ?? 2;
 
   const seed: SeedInputs = useMemo(() => {
     const milesByRegion: Record<Region, number> = { CA: 0, OR: 0, WA: 0, BC: 0 };
@@ -38,23 +51,77 @@ export default function BudgetPage() {
       .map((s) => ({ region: regionOf(s.lat), bigCity: BIG_CITY_PATTERN.test(s.name) }));
     return {
       milesByRegion,
-      mpg: trip?.mpg ?? 28,
-      travelers: trip?.travelers ?? 2,
+      mpg,
+      travelers,
       totalDays: Math.max(1, days.length),
       nights,
     };
-  }, [routes, stops, trip, days.length]);
+  }, [routes, stops, mpg, travelers, days.length]);
 
-  const projections = useMemo(
-    () => CATEGORIES.map((c) => projectCategory(c, [], seed, 0)),
+  const estimates = useMemo(
+    () =>
+      Object.fromEntries(CATEGORIES.map((c) => [c, seedEstimate(c, seed)])) as Record<
+        ExpenseCategory,
+        number
+      >,
     [seed],
   );
+  const total = CATEGORIES.reduce((s, c) => s + estimates[c], 0);
+  const maxEstimate = Math.max(...CATEGORIES.map((c) => estimates[c]), 1);
+  const totalMiles = Object.values(seed.milesByRegion).reduce((a, b) => a + b, 0);
 
-  const total = useMemo(
-    () => projections.reduce((s, p) => s + p.estimate, 0),
-    [projections],
-  );
-  const maxEstimate = Math.max(...projections.map((p) => p.estimate), 1);
+  // estimated spend per category per day — powers the trend bars
+  const daily = useMemo(() => {
+    const stopById = new Map(stops.map((s) => [s.id, s]));
+    const byCat = {} as Record<ExpenseCategory, number[]>;
+    for (const c of CATEGORIES) byCat[c] = [];
+    for (const day of orderedDays) {
+      const route: DayRoute | undefined = routes[day.id];
+      let gas = 0;
+      for (const seg of route?.segments ?? []) {
+        const from = stopById.get(seg.fromStopId);
+        if (!from) continue;
+        gas +=
+          ((seg.distanceM / 1609.344) * GAS_PRICE_USD_PER_GAL[regionOf(from.lat)]) /
+          Math.max(1, mpg);
+      }
+      const overnight: Stop | undefined = stops.find(
+        (s) => s.day_id === day.id && s.is_overnight,
+      );
+      const lodging = overnight
+        ? LODGING_PER_NIGHT[regionOf(overnight.lat)] +
+          (BIG_CITY_PATTERN.test(overnight.name) ? BIG_CITY_BUMP : 0)
+        : 0;
+      byCat.gas.push(gas);
+      byCat.lodging.push(lodging);
+      byCat.food.push(FOOD_PER_PERSON_DAY * travelers);
+      byCat.activities.push(ACTIVITIES_PER_PERSON_DAY * travelers);
+      byCat.misc.push(MISC_PER_DAY);
+    }
+    return byCat;
+  }, [orderedDays, routes, stops, mpg, travelers]);
+
+  // one-line "how it's figured" per category
+  const assumption: Record<ExpenseCategory, string> = useMemo(() => {
+    const gallons = totalMiles / Math.max(1, mpg);
+    const avgGal = gallons > 0 ? estimates.gas / gallons : 0;
+    const nights = seed.nights.length;
+    const avgNight = nights > 0 ? estimates.lodging / nights : 0;
+    const nDays = orderedDays.length || 1;
+    return {
+      gas:
+        totalMiles > 0
+          ? `${fmtMiles(totalMiles * 1609.344)} at ${mpg} mpg · avg ${fmtMoney(avgGal)}/gal`
+          : "No route yet — add stops and this fills in from real miles",
+      lodging:
+        nights > 0
+          ? `${nights} night${nights === 1 ? "" : "s"} · avg ${fmtMoney(avgNight)}/night`
+          : "No overnights marked yet — flag stops as overnight stays",
+      food: `${fmtMoney(FOOD_PER_PERSON_DAY)}/person/day × ${travelers} × ${nDays} days`,
+      activities: `${fmtMoney(ACTIVITIES_PER_PERSON_DAY)}/person/day × ${travelers} × ${nDays} days`,
+      misc: `${fmtMoney(MISC_PER_DAY)}/day × ${nDays} days`,
+    };
+  }, [totalMiles, mpg, estimates, seed.nights.length, orderedDays.length, travelers]);
 
   return (
     <div className="min-h-dvh pb-32">
@@ -62,7 +129,7 @@ export default function BudgetPage() {
         <div className="glass border-x-0 border-t-0 px-5 pb-3.5 pt-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="eyebrow">Two travelers · 50/50</p>
+              <p className="eyebrow">Trip estimate</p>
               <h1 className="display mt-0.5 text-[22px] tracking-tight">Budget</h1>
             </div>
             <CountdownPill />
@@ -82,15 +149,13 @@ export default function BudgetPage() {
             }}
           />
           <p className="eyebrow">Estimated trip total</p>
-          <p className="display tnum mt-2 text-[46px] leading-none">
-            {fmtMoney(total)}
-          </p>
+          <p className="display tnum mt-2 text-[46px] leading-none">{fmtMoney(total)}</p>
           <div className="stat-strip mt-5">
             <span>
               <span className="mono block text-[13px] font-semibold">
-                {fmtMoney(total / 2)}
+                {totalMiles > 0 ? fmtMiles(totalMiles * 1609.344) : "—"}
               </span>
-              <span className="eyebrow mt-0.5 block">each</span>
+              <span className="eyebrow mt-0.5 block">route</span>
             </span>
             <span>
               <span className="mono block text-[13px] font-semibold">
@@ -105,39 +170,60 @@ export default function BudgetPage() {
           </div>
         </section>
 
-        {/* per-category breakdown */}
-        <section className="card space-y-4 p-5">
-          {projections.map((p) => {
-            const color = EXPENSE_COLOR[p.category];
+        {/* per-category breakdown — tap a row for the math + daily trend */}
+        <section className="card p-2">
+          {CATEGORIES.map((c) => {
+            const color = EXPENSE_COLOR[c];
+            const open = openCat === c;
             return (
-              <div key={p.category}>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <p className="flex items-center gap-2.5 text-sm font-semibold">
-                    <span
-                      className="flex h-7 w-7 items-center justify-center rounded-lg"
-                      style={{ background: color.bg, color: color.fg }}
-                    >
-                      <ExpenseCategoryIcon category={p.category} size={14} strokeWidth={2} />
+              <div key={c} className={open ? "rounded-2xl bg-fg/[0.025]" : ""}>
+                <button
+                  onClick={() => setOpenCat(open ? null : c)}
+                  className="flex min-h-[56px] w-full items-center gap-3 px-3 py-2 text-left"
+                >
+                  <span
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
+                    style={{ background: color.bg, color: color.fg }}
+                  >
+                    <ExpenseCategoryIcon category={c} size={15} strokeWidth={2} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold">{CATEGORY_LABEL[c]}</span>
+                    <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-fg/5">
+                      <span
+                        className="block h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${(estimates[c] / maxEstimate) * 100}%`,
+                          background: color.fg,
+                        }}
+                      />
                     </span>
-                    {CATEGORY_LABEL[p.category]}
-                  </p>
-                  <p className="tnum text-sm font-semibold">{fmtMoney(p.estimate)}</p>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-fg/5">
-                  <div
-                    className="h-full rounded-full transition-all duration-300"
-                    style={{
-                      width: `${(p.estimate / maxEstimate) * 100}%`,
-                      background: color.fg,
-                    }}
+                  </span>
+                  <span className="tnum text-sm font-semibold">{fmtMoney(estimates[c])}</span>
+                  <IconChevronDown
+                    size={14}
+                    className={`flex-shrink-0 text-fg-faint transition-transform duration-200 ${
+                      open ? "rotate-180" : ""
+                    }`}
                   />
-                </div>
+                </button>
+
+                {open && (
+                  <div className="rise-in px-3 pb-3.5 pt-1">
+                    <p className="text-[11px] leading-4 text-fg-muted">{assumption[c]}</p>
+                    <TrendBars
+                      values={daily[c]}
+                      color={color.fg}
+                      average={estimates[c] / Math.max(1, orderedDays.length)}
+                    />
+                  </div>
+                )}
               </div>
             );
           })}
-          <p className="hairline-t pt-3 text-[10px] leading-4 text-fg-faint">
-            Seeded from 2026 regional averages for CA · OR · WA · BC, plus fuel
-            computed from your actual route miles.
+          <p className="hairline-t mx-3 mb-2 mt-1 pt-2.5 text-[10px] leading-4 text-fg-faint">
+            Seeded from 2026 regional averages for CA · OR · WA · BC. Fuel and
+            lodging sharpen as the route and overnight stays take shape.
           </p>
         </section>
 
@@ -175,6 +261,88 @@ export default function BudgetPage() {
             </div>
           </div>
         </section>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Day-by-day estimate for one category: thin rounded bars in the category
+ * hue with a dashed line at the daily average. Labels use text tokens.
+ */
+function TrendBars({
+  values,
+  color,
+  average,
+}: {
+  values: number[];
+  color: string;
+  average: number;
+}) {
+  const n = values.length;
+  const max = Math.max(...values, 1);
+  if (n === 0 || values.every((v) => v === 0)) {
+    return (
+      <p className="mt-2.5 rounded-xl bg-fg/[0.03] px-3 py-2.5 text-center text-[11px] text-fg-faint">
+        The day-by-day curve appears once the itinerary has stops.
+      </p>
+    );
+  }
+
+  const W = 320;
+  const H = 64;
+  const PAD_TOP = 14;
+  const gap = 2;
+  const bw = (W - gap * (n - 1)) / n;
+  const peak = values.indexOf(Math.max(...values));
+  const avgY = PAD_TOP + (H - PAD_TOP) * (1 - average / max);
+
+  return (
+    <div className="mt-2.5">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" role="img" aria-label="Estimated cost per day">
+        {values.map((v, i) => {
+          const h = Math.max(v > 0 ? 3 : 1.5, (v / max) * (H - PAD_TOP));
+          const x = i * (bw + gap);
+          return (
+            <rect
+              key={i}
+              x={x}
+              y={H - h}
+              width={bw}
+              height={h}
+              rx={Math.min(3, bw / 2)}
+              fill={v > 0 ? color : "var(--hairline)"}
+              opacity={v > 0 ? 0.9 : 1}
+            />
+          );
+        })}
+        {average > 0 && average < max && (
+          <line
+            x1={0}
+            x2={W}
+            y1={avgY}
+            y2={avgY}
+            stroke="var(--fg-faint)"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+        )}
+        {/* direct label on the peak day only */}
+        <text
+          x={Math.min(Math.max(peak * (bw + gap) + bw / 2, 16), W - 16)}
+          y={Math.max(9, H - (values[peak] / max) * (H - PAD_TOP) - 4)}
+          textAnchor="middle"
+          fontSize={9}
+          fill="var(--fg-muted)"
+          className="tnum"
+        >
+          {fmtMoney(values[peak])}
+        </text>
+      </svg>
+      <div className="mt-1 flex justify-between">
+        <span className="eyebrow">day 1</span>
+        <span className="eyebrow">avg {fmtMoney(average)}/day</span>
+        <span className="eyebrow">day {n}</span>
       </div>
     </div>
   );
