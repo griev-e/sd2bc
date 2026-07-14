@@ -80,8 +80,8 @@ export default function MorePage() {
               </div>
             ) : (
               <p className="rounded-2xl bg-accent-soft p-3 text-xs leading-5 text-fg-muted">
-                The second seat is open — have her create an account on the login
-                screen and everything syncs live between your phones.
+                Your co-pilot&apos;s seat is ready — she just needs to sign in on
+                her phone and everything syncs live.
               </p>
             )}
           </div>
