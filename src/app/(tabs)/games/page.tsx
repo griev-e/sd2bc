@@ -11,10 +11,10 @@ import type { GameId } from "@/lib/types";
 
 const GAMES: { id: GameId; label: string; blurb: string }[] = [
   { id: "plates", label: "Plates", blurb: "License-plate bingo, first tap wins" },
-  { id: "roadside", label: "I spy", blurb: "Roadside scavenger hunt" },
+  { id: "roadside", label: "I Spy", blurb: "Roadside scavenger hunt" },
   { id: "fastfood", label: "Chains", blurb: "Count your chain's sightings" },
-  { id: "cars", label: "Fancy cars", blurb: "Priciest spot on record" },
-  { id: "words", label: "Word rush", blurb: "Taboo, 60 seconds a round" },
+  { id: "cars", label: "$$$ Cars", blurb: "Priciest spot on record" },
+  { id: "words", label: "Word Rush", blurb: "Taboo, 60 seconds a round" },
 ];
 
 export default function GamesPage() {

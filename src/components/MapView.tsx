@@ -9,6 +9,7 @@ import { dayColor } from "@/lib/colors";
 import { bboxOf, type LngLat } from "@/lib/geo";
 import { insertShapingPoint } from "@/lib/shaping";
 import { stopsForDay, useTrip } from "@/lib/store";
+import { effectiveDark } from "@/lib/theme";
 import type { Stop } from "@/lib/types";
 
 interface MapViewProps {
@@ -86,7 +87,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   // ---- init ---------------------------------------------------------------
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = effectiveDark();
     const initialMode: StyleMode =
       localStorage.getItem(STYLE_PREF_KEY) === "satellite" ? "satellite" : "street";
     const map = new maplibregl.Map({
@@ -190,7 +191,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     const next: StyleMode = styleMode === "street" ? "satellite" : "street";
     setStyleMode(next);
     localStorage.setItem(STYLE_PREF_KEY, next);
-    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = effectiveDark();
     map.setStyle(
       next === "satellite"
         ? (MAP_STYLE_SATELLITE as StyleSpecification)

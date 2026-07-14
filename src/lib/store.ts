@@ -71,6 +71,8 @@ interface TripState {
 
   // days
   updateDay: (id: string, patch: Partial<Day>) => Promise<void>;
+  addDay: () => Promise<void>;
+  deleteDay: (id: string) => Promise<void>;
 
   // trip settings
   updateTrip: (patch: Partial<Trip>) => Promise<void>;
@@ -105,6 +107,13 @@ let routeRun = 0;
 
 function sortDays(days: Day[]): Day[] {
   return [...days].sort((a, b) => a.seq - b.seq);
+}
+
+/** 'YYYY-MM-DD' + n days, timezone-proof. */
+function shiftDate(iso: string, n: number): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 function sortStops(stops: Stop[]): Stop[] {
   return [...stops].sort((a, b) => a.seq - b.seq);
@@ -479,6 +488,64 @@ export const useTrip = create<TripState>((set, get) => {
     updateDay: async (id, patch) => {
       set({ days: get().days.map((d) => (d.id === id ? { ...d, ...patch } : d)) });
       await supabase().from("days").update(patch).eq("id", id);
+    },
+
+    addDay: async () => {
+      const s = get();
+      if (!s.trip) return;
+      const ordered = sortDays(s.days);
+      const last = ordered[ordered.length - 1];
+      const now = new Date().toISOString();
+      const row: Day = {
+        id: crypto.randomUUID(),
+        trip_id: s.trip.id,
+        seq: ordered.length + 1,
+        date: last ? shiftDate(last.date, 1) : s.trip.start_date,
+        title: "",
+        notes: "",
+        created_at: now,
+        updated_at: now,
+      };
+      set({ days: [...s.days, row] });
+      const { error } = await supabase().from("days").insert({
+        id: row.id,
+        trip_id: row.trip_id,
+        seq: row.seq,
+        date: row.date,
+        title: "",
+      });
+      if (error) set({ days: get().days.filter((d) => d.id !== row.id) });
+    },
+
+    deleteDay: async (id) => {
+      const s = get();
+      const ordered = sortDays(s.days);
+      if (!ordered.some((d) => d.id === id)) return;
+      const start = s.trip?.start_date ?? ordered[0].date;
+      const stopIds = s.stops.filter((x) => x.day_id === id).map((x) => x.id);
+      const stopIdSet = new Set(stopIds);
+
+      // days stay consecutive from the trip start after a removal
+      const remaining = ordered
+        .filter((d) => d.id !== id)
+        .map((d, i) => ({ ...d, seq: i + 1, date: shiftDate(start, i) }));
+      set({
+        days: remaining,
+        stops: s.stops.filter((x) => x.day_id !== id),
+        viaPoints: s.viaPoints.filter((v) => !stopIdSet.has(v.after_stop_id)),
+        selectedDayId: s.selectedDayId === id ? null : s.selectedDayId,
+      });
+      scheduleRoutes();
+
+      const db = supabase();
+      if (stopIds.length > 0) {
+        await db.from("via_points").delete().in("after_stop_id", stopIds);
+        await db.from("stops").delete().eq("day_id", id);
+      }
+      await db.from("days").delete().eq("id", id);
+      await Promise.all(
+        remaining.map((d) => db.from("days").update({ seq: d.seq, date: d.date }).eq("id", d.id)),
+      );
     },
 
     updateTrip: async (patch) => {
