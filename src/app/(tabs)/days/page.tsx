@@ -26,13 +26,11 @@ import { IconGrip, IconMoon, IconPlus, IconSparkle, IconTrash } from "@/componen
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
-import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay, fmtTimeOfDay } from "@/lib/format";
+import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
+import { type StopSchedule, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
 import { useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
-
-const DAY_START_MIN = 9 * 60; // depart 9:00 AM
-const DWELL_MIN = 45; // default time spent at each stop
 
 export default function DaysPage() {
   const days = useTrip((s) => s.days);
@@ -150,18 +148,9 @@ function DayCard({
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
   );
 
-  // arrival clock estimate per stop (9:00 departure + drives + dwell)
-  const arrivals = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!route) return map;
-    let t = DAY_START_MIN;
-    for (const seg of route.segments) {
-      t += seg.durationS / 60;
-      map.set(seg.toStopId, t);
-      t += DWELL_MIN;
-    }
-    return map;
-  }, [route]);
+  // Live ETAs cascade from the departure time, drive durations, and each
+  // stop's planned stay — shared with the stop editor.
+  const schedule = useSchedule();
 
   const segByFrom = useMemo(() => {
     const m = new Map<string, { distanceM: number; durationS: number }>();
@@ -252,7 +241,7 @@ function DayCard({
                 key={stop.id}
                 stop={stop}
                 isLast={si === dayStops.length - 1}
-                arrival={arrivals.get(stop.id)}
+                sched={schedule.get(stop.id)}
                 seg={si < dayStops.length - 1 ? segByFrom.get(stop.id) : undefined}
                 onTap={() => {
                   setSelectedStop(stop.id);
@@ -302,13 +291,13 @@ function DayCard({
 function SortableStop({
   stop,
   isLast,
-  arrival,
+  sched,
   seg,
   onTap,
 }: {
   stop: Stop;
   isLast: boolean;
-  arrival?: number;
+  sched?: StopSchedule;
   seg?: { distanceM: number; durationS: number };
   onTap: () => void;
 }) {
@@ -347,15 +336,20 @@ function SortableStop({
             )}
           </p>
           <p className="tnum mt-0.5 text-[11px] text-fg-faint">
-            {stop.start_time ? (
-              <span className="font-semibold text-accent">
-                {fmtTimeOfDay(stop.start_time)}
-                {stop.duration_min ? ` · ${fmtStay(stop.duration_min)}` : ""}
-              </span>
-            ) : arrival !== undefined ? (
-              `~${fmtClock(arrival)}`
+            {sched ? (
+              sched.anchored ? (
+                <span className="font-semibold text-accent">
+                  {fmtClock(sched.arrivalMin)}
+                  {stop.duration_min ? ` · ${fmtStay(stop.duration_min)}` : ""}
+                </span>
+              ) : (
+                <span>
+                  ~{fmtClock(sched.arrivalMin)}
+                  {stop.duration_min ? ` · ${fmtStay(stop.duration_min)}` : ""}
+                </span>
+              )
             ) : (
-              "departure"
+              "no ETA yet"
             )}
             {stop.notes && " · note"}
           </p>

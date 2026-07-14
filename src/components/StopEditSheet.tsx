@@ -6,8 +6,21 @@ import AttributionDot from "./Attribution";
 import { StopKindIcon } from "./CategoryIcon";
 import { IconLink, IconX } from "./Icons";
 import { KIND_COLOR } from "@/lib/colors";
-import { useTrip } from "@/lib/store";
+import { fmtClock } from "@/lib/format";
+import { DAY_START_MIN, minutesToHHMM, useSchedule } from "@/lib/schedule";
+import { stopsForDay, useTrip } from "@/lib/store";
 import type { Stop, StopKind } from "@/lib/types";
+
+/** Planned lengths of stay offered in the editor; null = a pass-through. */
+const STAY_OPTIONS: [number | null, string][] = [
+  [null, "None"],
+  [30, "30m"],
+  [60, "1h"],
+  [90, "1.5h"],
+  [120, "2h"],
+  [180, "3h"],
+  [240, "4h"],
+];
 
 export const KIND_META: { key: StopKind; label: string }[] = [
   { key: "stop", label: "Stop" },
@@ -44,6 +57,21 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
   const stop = useTrip((s) => s.stops.find((x) => x.id === stopId));
   const updateStop = useTrip((s) => s.updateStop);
   const deleteStop = useTrip((s) => s.deleteStop);
+
+  // Is this the very first stop of the trip? Then its time is a *departure*
+  // ("leave home at 8"), not an arrival, and it has no stay to plan.
+  const isOrigin = useTrip((s) => {
+    if (!stop) return false;
+    const firstDay = [...s.days].sort((a, b) => a.seq - b.seq)[0];
+    if (!firstDay) return false;
+    return stopsForDay(s.stops, firstDay.id)[0]?.id === stop.id;
+  });
+
+  // Live ETA for this stop — used to prefill the time picker so pinning a time
+  // starts from the estimate rather than a blank field.
+  const schedule = useSchedule();
+  const sched = stop ? schedule.get(stop.id) : undefined;
+  const anchorSeed = sched?.arrivalMin ?? DAY_START_MIN;
 
   const [name, setName] = useState(stop?.name ?? "");
   const [notes, setNotes] = useState(stop?.notes ?? "");
@@ -120,46 +148,13 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
         </div>
       </div>
 
-      {/* schedule — a time, optionally with a length of stay */}
-      <div>
-        <p className="eyebrow mb-2 px-0.5">Time</p>
-        <div className="flex items-center gap-2">
-          <input
-            type="time"
-            value={stop.start_time ?? ""}
-            onChange={(e) =>
-              void updateStop(stop.id, {
-                start_time: e.target.value || null,
-                // clearing the time clears the stay length too
-                ...(e.target.value ? {} : { duration_min: null }),
-              })
-            }
-            className="field flex-1"
-            aria-label="Scheduled time"
-          />
-          {stop.start_time && (
-            <button
-              onClick={() => void updateStop(stop.id, { start_time: null, duration_min: null })}
-              aria-label="Clear time"
-              className="btn-ghost pressable flex h-[46px] w-[46px] flex-shrink-0 items-center justify-center rounded-xl"
-            >
-              <IconX size={14} />
-            </button>
-          )}
-        </div>
-        {stop.start_time && (
-          <div className="no-scrollbar -mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1">
-            {(
-              [
-                [null, "Just a time"],
-                [30, "30m"],
-                [60, "1h"],
-                [90, "1.5h"],
-                [120, "2h"],
-                [180, "3h"],
-                [240, "4h"],
-              ] as [number | null, string][]
-            ).map(([mins, label]) => {
+      {/* Planned stay — pushes the next stop's ETA, independent of any pinned
+          time. The origin has no stay (you just leave). */}
+      {!isOrigin && (
+        <div>
+          <p className="eyebrow mb-2 px-0.5">Time at this stop</p>
+          <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
+            {STAY_OPTIONS.map(([mins, label]) => {
               const active = (stop.duration_min ?? null) === mins;
               return (
                 <button
@@ -176,13 +171,61 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
               );
             })}
           </div>
+          <p className="mt-1.5 px-0.5 text-[11px] leading-4 text-fg-faint">
+            How long you&rsquo;ll stay — the next stop&rsquo;s ETA starts once you
+            leave.
+          </p>
+        </div>
+      )}
+
+      {/* Optional anchor — pins a time and re-seeds the ETA chain from here.
+          Prefills from the live estimate so you adjust rather than override. */}
+      <div>
+        <p className="eyebrow mb-2 px-0.5">
+          {isOrigin ? "Departure time" : "Arrival time"}
+        </p>
+        {stop.start_time ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="time"
+              value={stop.start_time}
+              onChange={(e) =>
+                void updateStop(stop.id, { start_time: e.target.value || null })
+              }
+              className="field flex-1"
+              aria-label={isOrigin ? "Departure time" : "Arrival time"}
+            />
+            <button
+              onClick={() => void updateStop(stop.id, { start_time: null })}
+              aria-label="Clear time"
+              className="btn-ghost pressable flex h-[46px] w-[46px] flex-shrink-0 items-center justify-center rounded-xl"
+            >
+              <IconX size={14} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() =>
+              void updateStop(stop.id, { start_time: minutesToHHMM(anchorSeed) })
+            }
+            className="field pressable flex w-full items-center justify-between text-left"
+          >
+            <span className="text-fg-muted">
+              {isOrigin ? "Set departure time" : "Pin an arrival time"}
+            </span>
+            <span className="tnum font-semibold text-accent">
+              {fmtClock(anchorSeed)}
+            </span>
+          </button>
         )}
         <p className="mt-1.5 px-0.5 text-[11px] leading-4 text-fg-faint">
           {stop.start_time
-            ? stop.duration_min
-              ? "Arrive at the time, stay for the length picked."
-              : "A single point in time — good for departures or check-ins."
-            : "Optional — set one for departures, reservations, or check-ins."}
+            ? isOrigin
+              ? "You leave at this time — every ETA downstream follows from here."
+              : "Locked — the ETA bends to this time, and later stops shift with it."
+            : isOrigin
+              ? "Defaults to 9:00 AM. Set when you'll head out."
+              : `Optional — otherwise we estimate ~${fmtClock(anchorSeed)}. Pin it for reservations or check-ins.`}
         </p>
       </div>
 
