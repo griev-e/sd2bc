@@ -8,7 +8,7 @@ import { IconSparkle, IconWave, IconX } from "@/components/Icons";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import Sheet from "@/components/Sheet";
-import { dayColor } from "@/lib/colors";
+import { dayColor, KIND_COLOR } from "@/lib/colors";
 import { NOMINATIM_URL } from "@/lib/config";
 import { fmtDuration, fmtMiles } from "@/lib/format";
 import type { LngLat } from "@/lib/geo";
@@ -80,14 +80,9 @@ export default function MapPage() {
       {/* header */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 pt-safe">
         <div className="mx-auto flex max-w-md items-center justify-between px-4 pt-3">
-          <div className="glass pointer-events-auto flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-4">
-            <span
-              className="flex h-6 w-6 items-center justify-center rounded-full text-white"
-              style={{ background: "var(--accent-gradient)" }}
-            >
-              <IconWave size={14} strokeWidth={2.2} />
-            </span>
-            <span className="text-sm font-bold tracking-tight">Coastline</span>
+          <div className="glass pointer-events-auto flex items-center gap-2 rounded-full py-1.5 pl-3 pr-4">
+            <IconWave size={15} strokeWidth={1.8} className="text-accent" />
+            <span className="display text-[15px] leading-none">coastline</span>
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
             {routesPending && (
@@ -146,7 +141,13 @@ export default function MapPage() {
       {selectedStop && !editOpen && (
         <div className="absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+88px)] z-10 mx-auto max-w-md px-4">
           <div className="glass-strong rise-in flex items-center gap-3 rounded-2xl p-4">
-            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+            <div
+              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl"
+              style={{
+                background: KIND_COLOR[selectedStop.kind].bg,
+                color: KIND_COLOR[selectedStop.kind].fg,
+              }}
+            >
               <StopKindIcon kind={selectedStop.kind} size={19} />
             </div>
             <div className="min-w-0 flex-1">

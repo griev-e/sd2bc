@@ -25,7 +25,7 @@ import { StopKindIcon } from "@/components/CategoryIcon";
 import { IconGrip, IconMoon, IconPlus, IconSparkle } from "@/components/Icons";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
-import { dayColor } from "@/lib/colors";
+import { dayColor, KIND_COLOR } from "@/lib/colors";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles } from "@/lib/format";
 import { stopsForDay, useTrip } from "@/lib/store";
 import type { Day, DayRoute, Stop } from "@/lib/types";
@@ -61,7 +61,7 @@ export default function DaysPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="eyebrow">SAN → YVR → SAN</p>
-              <h1 className="mt-0.5 text-xl font-bold tracking-tight">Itinerary</h1>
+              <h1 className="display mt-0.5 text-[22px] tracking-tight">Itinerary</h1>
             </div>
             <CountdownPill />
           </div>
@@ -216,6 +216,12 @@ function DayCard({
         </p>
       )}
 
+      {dayStops.length === 0 && (
+        <p className="mt-3 rounded-xl bg-fg/[0.03] px-3 py-2.5 text-center text-xs text-fg-faint">
+          Nothing planned yet — add a stop or browse suggestions.
+        </p>
+      )}
+
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={dayStops.map((s) => s.id)} strategy={verticalListSortingStrategy}>
           <ol className="mt-1.5">
@@ -223,7 +229,6 @@ function DayCard({
               <SortableStop
                 key={stop.id}
                 stop={stop}
-                color={color}
                 isLast={si === dayStops.length - 1}
                 arrival={arrivals.get(stop.id)}
                 seg={si < dayStops.length - 1 ? segByFrom.get(stop.id) : undefined}
@@ -257,14 +262,12 @@ function DayCard({
 
 function SortableStop({
   stop,
-  color,
   isLast,
   arrival,
   seg,
   onTap,
 }: {
   stop: Stop;
-  color: string;
   isLast: boolean;
   arrival?: number;
   seg?: { distanceM: number; durationS: number };
@@ -292,8 +295,8 @@ function SortableStop({
         onClick={onTap}
       >
         <span
-          className="relative z-[1] flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border border-hairline bg-bg-elevated"
-          style={{ color }}
+          className="relative z-[1] flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg"
+          style={{ background: KIND_COLOR[stop.kind].bg, color: KIND_COLOR[stop.kind].fg }}
         >
           <StopKindIcon kind={stop.kind} size={13} strokeWidth={2} />
         </span>

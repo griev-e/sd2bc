@@ -36,38 +36,22 @@ export default function LoginPage() {
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
-      {/* ambient gradient mesh */}
+      {/* faint dawn wash — teal into coral, barely there */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(90% 55% at 15% -5%, var(--accent-soft), transparent 60%)," +
-            "radial-gradient(70% 45% at 100% 30%, rgba(8,145,178,0.09), transparent 65%)," +
-            "radial-gradient(80% 50% at 40% 115%, var(--accent-soft), transparent 60%)",
+            "radial-gradient(70% 45% at 20% -8%, var(--accent-soft), transparent 62%)," +
+            "radial-gradient(60% 38% at 92% 108%, var(--coral-soft), transparent 65%)",
         }}
       />
 
-      <div className="relative mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-6 py-12">
-        {/* wordmark */}
-        <div className="mb-10">
-          <div className="mb-5 flex items-center gap-2.5">
-            <span
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-              style={{ background: "var(--accent-gradient)" }}
-            >
-              <IconWave size={20} strokeWidth={2} />
-            </span>
-            <span className="text-lg font-bold tracking-tight">Coastline</span>
-          </div>
-          <h1 className="text-[34px] font-bold leading-[1.05] tracking-[-0.03em]">
-            One coast.
-            <br />
-            <span className="text-gradient">Two of us.</span>
+      <div className="relative mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-7 pb-16">
+        <div className="mb-12 text-center">
+          <IconWave size={30} strokeWidth={1.6} className="mx-auto text-accent" />
+          <h1 className="display mt-4 text-[40px] leading-none tracking-[-0.02em]">
+            coastline
           </h1>
-          <p className="mt-3 text-sm leading-6 text-fg-muted">
-            San Diego → Vancouver → home. The route, the plan, the budget —
-            live on both phones.
-          </p>
         </div>
 
         <form onSubmit={submit} className="space-y-3">
@@ -90,7 +74,7 @@ export default function LoginPage() {
             required
             className="field"
           />
-          {error && <p className="px-1 text-sm text-danger">{error}</p>}
+          {error && <p className="px-1 text-center text-sm text-danger">{error}</p>}
           <button
             type="submit"
             disabled={busy}
@@ -99,13 +83,7 @@ export default function LoginPage() {
             {busy ? "…" : "Sign in"}
           </button>
         </form>
-
-        <p className="mt-6 text-center text-xs text-fg-faint">
-          Private trip — two seats, both spoken for.
-        </p>
       </div>
-
-      <p className="eyebrow relative pb-8 text-center">est. july 27, 2026</p>
     </div>
   );
 }
