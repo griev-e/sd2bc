@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
+import { computeSchedule } from "@/lib/schedule";
 import { supabase } from "@/lib/supabase";
 import { useTrip } from "@/lib/store";
 import { useWeather } from "@/lib/weather";
@@ -14,12 +15,19 @@ export default function TabsLayout({ children }: { children: React.ReactNode }) 
   const loaded = useTrip((s) => s.loaded);
   const days = useTrip((s) => s.days);
   const stops = useTrip((s) => s.stops);
+  const routes = useTrip((s) => s.routes);
   const syncWeather = useWeather((s) => s.sync);
 
-  // forecasts refresh whenever the plan changes (cached ½ hour internally)
+  // forecasts refresh whenever the plan changes (cached ½ hour internally);
+  // each cluster is sampled at its estimated arrival hour
   useEffect(() => {
-    if (loaded) syncWeather(days, stops);
-  }, [loaded, days, stops, syncWeather]);
+    if (!loaded) return;
+    const ordered = [...days].sort((a, b) => a.seq - b.seq);
+    const schedule = computeSchedule(ordered, stops, routes);
+    const arrivalMin: Record<string, number> = {};
+    for (const [stopId, s] of schedule) arrivalMin[stopId] = s.arrivalMin;
+    syncWeather(days, stops, arrivalMin);
+  }, [loaded, days, stops, routes, syncWeather]);
 
   useEffect(() => {
     const db = supabase();

@@ -32,7 +32,7 @@ import { dayEmoji, NATURE_EMOJI } from "@/lib/emoji";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
 import { type StopSchedule, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
-import { type DayWeather, useWeather, weatherKind } from "@/lib/weather";
+import { type HourWeather, useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
 
 export default function DaysPage() {
@@ -159,7 +159,7 @@ function DayCard({
   // representative (first) stop only.
   const byCluster = useWeather((s) => s.byCluster);
   const clusterWeather = useMemo(() => {
-    const map = new Map<string, DayWeather>();
+    const map = new Map<string, HourWeather>();
     for (const c of clusterStops(dayStops)) {
       const w = byCluster[clusterKey(day.id, c.repStopId)];
       if (w) map.set(c.repStopId, w);
@@ -410,7 +410,7 @@ function SortableStop({
   stop: Stop;
   isLast: boolean;
   sched?: StopSchedule;
-  weather?: DayWeather;
+  weather?: HourWeather;
   seg?: { distanceM: number; durationS: number };
   onTap: () => void;
 }) {
@@ -470,7 +470,7 @@ function SortableStop({
         {weather && (
           <span className="flex flex-shrink-0 items-center gap-1 text-fg-muted">
             <WeatherIcon kind={weatherKind(weather.code)} size={14} strokeWidth={2} />
-            <span className="tnum text-[11px] font-medium">{weather.tMaxF}°</span>
+            <span className="tnum text-[11px] font-medium">{weather.tempF}°</span>
           </span>
         )}
         <AttributionDot userId={stop.updated_by ?? stop.created_by} size={14} />
