@@ -121,3 +121,17 @@ export interface DayRoute {
   distanceM: number;
   durationS: number;
 }
+
+export type GameId = "plates" | "cars" | "roadside" | "words" | "fastfood";
+export type GameEventKind = "claim" | "entry" | "count" | "score";
+
+/** One row in the shared road-games event stream. */
+export interface GameEvent {
+  id: string;
+  game: GameId;
+  kind: GameEventKind;
+  key: string | null;
+  value: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+}

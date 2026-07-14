@@ -10,6 +10,24 @@ export const SUPABASE_ANON_KEY =
 
 export const OSRM_URL = "https://router.project-osrm.org";
 export const OVERPASS_URL = "/api/overpass";
+
+/** Free Esri World Imagery raster style for the satellite map mode. */
+export const MAP_STYLE_SATELLITE = {
+  version: 8 as const,
+  sources: {
+    "esri-imagery": {
+      type: "raster" as const,
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution:
+        "Powered by <a href='https://www.esri.com'>Esri</a> — Maxar, Earthstar Geographics, GIS User Community",
+    },
+  },
+  layers: [{ id: "esri-imagery", type: "raster" as const, source: "esri-imagery" }],
+};
 export const NOMINATIM_URL = "https://nominatim.openstreetmap.org";
 
 export const MAP_STYLE_LIGHT = "https://tiles.openfreemap.org/styles/positron";

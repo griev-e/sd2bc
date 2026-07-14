@@ -1,9 +1,10 @@
 "use client";
 
-import maplibregl, { Map as MLMap, Marker } from "maplibre-gl";
+import maplibregl, { Map as MLMap, Marker, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
-import { MAP_STYLE_DARK, MAP_STYLE_LIGHT } from "@/lib/config";
+import { MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_SATELLITE } from "@/lib/config";
+import { IconLayers } from "./Icons";
 import { dayColor } from "@/lib/colors";
 import { bboxOf, type LngLat } from "@/lib/geo";
 import { insertShapingPoint } from "@/lib/shaping";
@@ -15,6 +16,41 @@ interface MapViewProps {
   onLongPress?: (lngLat: LngLat) => void;
 }
 
+type StyleMode = "street" | "satellite";
+
+const STYLE_PREF_KEY = "coastline-map-style";
+
+/** Route source + line layers — added on load and re-added after setStyle. */
+function addRouteLayers(map: MLMap, mode: StyleMode, dark: boolean) {
+  if (map.getSource("routes")) return;
+  map.addSource("routes", {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: "route-casing",
+    type: "line",
+    source: "routes",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": mode === "satellite" ? "#ffffff" : dark ? "#0a0f13" : "#ffffff",
+      "line-width": 7,
+      "line-opacity": ["get", "opacity"],
+    },
+  });
+  map.addLayer({
+    id: "route-line",
+    type: "line",
+    source: "routes",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": ["get", "color"],
+      "line-width": 4,
+      "line-opacity": ["get", "opacity"],
+    },
+  });
+}
+
 export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -22,6 +58,13 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   const viaMarkers = useRef(new Map<string, Marker>());
   const [mapReady, setMapReady] = useState(false);
   const [selectedVia, setSelectedVia] = useState<string | null>(null);
+  const [styleMode, setStyleMode] = useState<StyleMode>(() =>
+    typeof window !== "undefined" && localStorage.getItem(STYLE_PREF_KEY) === "satellite"
+      ? "satellite"
+      : "street",
+  );
+  // bumped after every style swap so data-dependent effects re-apply
+  const [styleEpoch, setStyleEpoch] = useState(0);
 
   // Stable identities for callbacks used inside the one-shot map init effect.
   const fireLongPress = useEffectEvent((lngLat: LngLat) => onLongPress?.(lngLat));
@@ -44,9 +87,16 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initialMode: StyleMode =
+      localStorage.getItem(STYLE_PREF_KEY) === "satellite" ? "satellite" : "street";
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: dark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT,
+      style:
+        initialMode === "satellite"
+          ? (MAP_STYLE_SATELLITE as StyleSpecification)
+          : dark
+            ? MAP_STYLE_DARK
+            : MAP_STYLE_LIGHT,
       center: [-122.6, 40.5],
       zoom: 4.6,
       attributionControl: { compact: true },
@@ -57,32 +107,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     (window as unknown as { __coastlineMap?: MLMap }).__coastlineMap = map;
 
     map.on("load", () => {
-      map.addSource("routes", {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-      map.addLayer({
-        id: "route-casing",
-        type: "line",
-        source: "routes",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": dark ? "#0a0f13" : "#ffffff",
-          "line-width": 7,
-          "line-opacity": ["get", "opacity"],
-        },
-      });
-      map.addLayer({
-        id: "route-line",
-        type: "line",
-        source: "routes",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": ["get", "color"],
-          "line-width": 4,
-          "line-opacity": ["get", "opacity"],
-        },
-      });
+      addRouteLayers(map, initialMode, dark);
 
       // Tap the line → drop a shaping point in that gap.
       map.on("click", "route-line", (e) => {
@@ -156,7 +181,29 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       type: "FeatureCollection",
       features: features as GeoJSON.Feature[],
     });
-  }, [routes, selectedDayId, mapReady, orderedDays.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routes, selectedDayId, mapReady, orderedDays.length, styleEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- street ⇄ satellite ---------------------------------------------------
+  const toggleStyle = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const next: StyleMode = styleMode === "street" ? "satellite" : "street";
+    setStyleMode(next);
+    localStorage.setItem(STYLE_PREF_KEY, next);
+    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    map.setStyle(
+      next === "satellite"
+        ? (MAP_STYLE_SATELLITE as StyleSpecification)
+        : dark
+          ? MAP_STYLE_DARK
+          : MAP_STYLE_LIGHT,
+    );
+    // setStyle wipes sources/layers; rebuild them once the new style is in
+    map.once("style.load", () => {
+      addRouteLayers(map, next, dark);
+      setStyleEpoch((e) => e + 1);
+    });
+  }, [styleMode]);
 
   // ---- stop markers -----------------------------------------------------------
   useEffect(() => {
@@ -303,6 +350,17 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
             strokeLinecap="round"
           />
         </svg>
+      </button>
+
+      {/* street / satellite toggle */}
+      <button
+        onClick={toggleStyle}
+        aria-label={styleMode === "street" ? "Switch to satellite" : "Switch to street map"}
+        className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+170px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
+          styleMode === "satellite" ? "text-accent" : "text-fg-muted"
+        }`}
+      >
+        <IconLayers size={18} strokeWidth={1.7} />
       </button>
 
       {/* shaping point delete pill */}

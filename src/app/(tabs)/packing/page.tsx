@@ -5,6 +5,7 @@ import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { IconPlus, IconX } from "@/components/Icons";
 import Sheet from "@/components/Sheet";
+import { displayName } from "@/lib/format";
 import { useTrip } from "@/lib/store";
 
 type AssignFilter = "all" | "me" | "partner" | "shared";
@@ -97,7 +98,7 @@ export default function PackingPage() {
             [
               ["all", "Everything"],
               ["me", "Mine"],
-              ["partner", partner ? partner.username : "Theirs"],
+              ["partner", displayName(partner) ?? "Theirs"],
               ["shared", "Shared"],
             ] as [AssignFilter, string][]
           ).map(([key, label]) => (
@@ -152,7 +153,7 @@ export default function PackingPage() {
                     </span>
                     {item.assigned_to && (
                       <span className="rounded-full border border-hairline px-2 py-0.5 text-[10px] font-medium text-fg-muted">
-                        {profiles.find((p) => p.id === item.assigned_to)?.username ?? "?"}
+                        {displayName(profiles.find((p) => p.id === item.assigned_to)) ?? "?"}
                       </span>
                     )}
                     {item.checked && <AttributionDot userId={item.checked_by} size={16} />}
@@ -225,7 +226,7 @@ export default function PackingPage() {
               [
                 [null, "Shared"],
                 [userId, "Me"],
-                [partner?.id ?? "none", partner?.username ?? "Partner"],
+                [partner?.id ?? "none", displayName(partner) ?? "Partner"],
               ] as [string | null, string][]
             ).map(([id, label]) => (
               <button

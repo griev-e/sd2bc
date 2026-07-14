@@ -198,3 +198,101 @@ export function IconSignout({ size = 18, className, strokeWidth = 1.8 }: IconPro
     </svg>
   );
 }
+
+/* ---- weather ---- */
+export function IconSun({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4" />
+    </svg>
+  );
+}
+export function IconPartlySunny({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M8.5 5.5V3.8M3.8 8.5H5.5M4.9 4.9l1.2 1.2M13.4 5.7a4 4 0 0 0-8 .5 4 4 0 0 0 .6 1.9" />
+      <path d="M7.5 19.5h9.3a3.2 3.2 0 0 0 .6-6.4 5 5 0 0 0-9.7-1.2 3.6 3.6 0 0 0-.2 7.6Z" />
+    </svg>
+  );
+}
+export function IconCloud({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M6.5 18.5h10.3a3.7 3.7 0 0 0 .7-7.3 5.5 5.5 0 0 0-10.7-1.3 4.1 4.1 0 0 0-.3 8.6Z" />
+    </svg>
+  );
+}
+export function IconFog({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M6.5 13h10.3a3.7 3.7 0 0 0 .7-7.3A5.5 5.5 0 0 0 7.3 6.5" />
+      <path d="M4 16.5h13M7 19.5h10" />
+    </svg>
+  );
+}
+export function IconRain({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M6.5 14.5h10.3a3.7 3.7 0 0 0 .7-7.3 5.5 5.5 0 0 0-10.7-1.3 4.1 4.1 0 0 0-.3 8.6Z" />
+      <path d="M8.5 17.5 7.5 20M12.5 17.5l-1 2.5M16.5 17.5l-1 2.5" />
+    </svg>
+  );
+}
+export function IconSnow({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M6.5 14.5h10.3a3.7 3.7 0 0 0 .7-7.3 5.5 5.5 0 0 0-10.7-1.3 4.1 4.1 0 0 0-.3 8.6Z" />
+      <path d="M8 18.2v.01M12 19.8v.01M16 18.2v.01" strokeWidth="2.4" />
+    </svg>
+  );
+}
+export function IconStorm({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M6.5 13.5h10.3a3.7 3.7 0 0 0 .7-7.3 5.5 5.5 0 0 0-10.7-1.3 4.1 4.1 0 0 0-.3 8.6Z" />
+      <path d="m12.5 13-2 4h3l-2 4" />
+    </svg>
+  );
+}
+
+/* ---- games & map ---- */
+export function IconDice({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <rect x="4" y="4" width="16" height="16" rx="4" />
+      <path d="M8.6 8.6v.01M15.4 8.6v.01M12 12v.01M8.6 15.4v.01M15.4 15.4v.01" strokeWidth="2.6" />
+    </svg>
+  );
+}
+export function IconTrophy({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" />
+      <path d="M8 5.5H5a3 3 0 0 0 3 4.4M16 5.5h3a3 3 0 0 1-3 4.4M12 13v3.5m-3.5 3.5h7m-5.5 0 .7-3.5h2.6l.7 3.5" />
+    </svg>
+  );
+}
+export function IconCrown({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="m4 8.5 3.8 3 4.2-5.5 4.2 5.5 3.8-3-1.4 9H5.4L4 8.5Z" />
+    </svg>
+  );
+}
+export function IconLayers({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="m12 3.5 8.5 4.6L12 12.7 3.5 8.1 12 3.5Z" />
+      <path d="m4.6 12.2 7.4 4 7.4-4M4.6 16.2l7.4 4 7.4-4" />
+    </svg>
+  );
+}
+export function IconTimer({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <circle cx="12" cy="13.5" r="7" />
+      <path d="M12 10v3.8l2.5 1.5M10 3h4" />
+    </svg>
+  );
+}

@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import CountdownPill from "@/components/CountdownPill";
-import { StopKindIcon } from "@/components/CategoryIcon";
+import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
 import { IconSparkle, IconWave, IconX } from "@/components/Icons";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
@@ -13,6 +13,7 @@ import { NOMINATIM_URL } from "@/lib/config";
 import { fmtDuration, fmtMiles } from "@/lib/format";
 import type { LngLat } from "@/lib/geo";
 import { useTrip } from "@/lib/store";
+import { useWeather, weatherKind, WEATHER_LABEL } from "@/lib/weather";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -42,6 +43,9 @@ export default function MapPage() {
 
   const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
   const selectedStop = stops.find((s) => s.id === selectedStopId) ?? null;
+  const stopWeather = useWeather((s) =>
+    selectedStop ? s.byDay[selectedStop.day_id] : undefined,
+  );
 
   // segment arriving at the selected stop
   const incoming = useMemo(() => {
@@ -164,6 +168,20 @@ export default function MapPage() {
                 )}
                 {selectedStop.is_overnight && " · overnight"}
               </p>
+              {stopWeather && (
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-fg-muted">
+                  <WeatherIcon
+                    kind={weatherKind(stopWeather.code)}
+                    size={13}
+                    strokeWidth={2}
+                    className="text-accent"
+                  />
+                  {WEATHER_LABEL[weatherKind(stopWeather.code)]}
+                  <span className="tnum">
+                    {stopWeather.tMaxF}° / {stopWeather.tMinF}°
+                  </span>
+                </p>
+              )}
             </div>
             <button
               onClick={() => setEditOpen(true)}
