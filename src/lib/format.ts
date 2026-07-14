@@ -54,3 +54,10 @@ export function fmtClock(minutes: number): string {
   const h = h24 % 12 === 0 ? 12 : h24 % 12;
   return `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
 }
+
+/** Preferred short name for a traveler: display name, else username. */
+export function displayName(
+  p: { display_name: string | null; username: string } | null | undefined,
+): string | undefined {
+  return p ? p.display_name || p.username : undefined;
+}

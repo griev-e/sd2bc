@@ -1,5 +1,6 @@
 "use client";
 
+import { displayName } from "@/lib/format";
 import { useTrip } from "@/lib/store";
 
 /** Tiny colored initial dot showing who created/edited a record. */
@@ -16,7 +17,7 @@ export default function AttributionDot({
   if (!p) return null;
   return (
     <span
-      title={p.username}
+      title={displayName(p)}
       className="inline-flex flex-shrink-0 items-center justify-center rounded-full font-semibold uppercase text-white"
       style={{
         width: size,
@@ -25,7 +26,7 @@ export default function AttributionDot({
         background: p.color,
       }}
     >
-      {p.username.slice(0, 1)}
+      {(displayName(p) ?? "?").slice(0, 1)}
     </span>
   );
 }

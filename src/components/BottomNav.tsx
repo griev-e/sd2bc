@@ -8,6 +8,7 @@ const TABS = [
   { href: "/days", label: "Days", icon: DaysIcon },
   { href: "/budget", label: "Budget", icon: BudgetIcon },
   { href: "/packing", label: "Packing", icon: PackIcon },
+  { href: "/games", label: "Games", icon: GamesIcon },
   { href: "/more", label: "More", icon: MoreIcon },
 ];
 
@@ -83,6 +84,18 @@ function PackIcon({ active }: { active: boolean }) {
     <svg width="21" height="21" viewBox="0 0 24 24">
       <rect {...stroke(active)} x="4.5" y="7" width="15" height="13" rx="3" />
       <path {...stroke(active)} d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-6.5 5 2 2 4-4" />
+    </svg>
+  );
+}
+function GamesIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="21" height="21" viewBox="0 0 24 24">
+      <rect {...stroke(active)} x="3.5" y="4.5" width="17" height="15" rx="4" />
+      <circle {...stroke(active)} cx="8.3" cy="9.3" r="0.4" />
+      <circle {...stroke(active)} cx="15.7" cy="9.3" r="0.4" />
+      <circle {...stroke(active)} cx="12" cy="12" r="0.4" />
+      <circle {...stroke(active)} cx="8.3" cy="14.7" r="0.4" />
+      <circle {...stroke(active)} cx="15.7" cy="14.7" r="0.4" />
     </svg>
   );
 }

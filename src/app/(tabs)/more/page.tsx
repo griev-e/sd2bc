@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
-import { fmtDate } from "@/lib/format";
+import { displayName, fmtDate } from "@/lib/format";
 import { useTrip } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
 
@@ -65,7 +65,7 @@ export default function MorePage() {
               <div className="flex items-center gap-3">
                 <AttributionDot userId={me.id} size={28} />
                 <div className="flex-1">
-                  <p className="text-sm font-medium">{me.username}</p>
+                  <p className="text-sm font-medium">{displayName(me)}</p>
                   <p className="text-xs text-fg-faint">you</p>
                 </div>
               </div>
@@ -74,7 +74,7 @@ export default function MorePage() {
               <div className="flex items-center gap-3">
                 <AttributionDot userId={partner.id} size={28} />
                 <div className="flex-1">
-                  <p className="text-sm font-medium">{partner.username}</p>
+                  <p className="text-sm font-medium">{displayName(partner)}</p>
                   <p className="text-xs text-fg-faint">co-pilot</p>
                 </div>
               </div>
@@ -100,7 +100,7 @@ export default function MorePage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-xs leading-4 text-fg-muted">
                       <span className="font-semibold text-fg">
-                        {profiles.find((p) => p.id === a.actor)?.username ?? "someone"}
+                        {displayName(profiles.find((p) => p.id === a.actor)) ?? "someone"}
                       </span>{" "}
                       {a.summary}
                     </p>

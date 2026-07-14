@@ -5,12 +5,21 @@ import { useRouter } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
 import { supabase } from "@/lib/supabase";
 import { useTrip } from "@/lib/store";
+import { useWeather } from "@/lib/weather";
 
 export default function TabsLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const init = useTrip((s) => s.init);
   const loaded = useTrip((s) => s.loaded);
+  const days = useTrip((s) => s.days);
+  const stops = useTrip((s) => s.stops);
+  const syncWeather = useWeather((s) => s.sync);
+
+  // forecasts refresh whenever the plan changes (cached ½ hour internally)
+  useEffect(() => {
+    if (loaded) syncWeather(days, stops);
+  }, [loaded, days, stops, syncWeather]);
 
   useEffect(() => {
     const db = supabase();

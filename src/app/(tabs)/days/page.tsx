@@ -21,13 +21,14 @@ import { useMemo, useState } from "react";
 import AddStopSheet from "@/components/AddStopSheet";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
-import { StopKindIcon } from "@/components/CategoryIcon";
+import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
 import { IconGrip, IconMoon, IconPlus, IconSparkle } from "@/components/Icons";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles } from "@/lib/format";
 import { stopsForDay, useTrip } from "@/lib/store";
+import { useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
 
 const DAY_START_MIN = 9 * 60; // depart 9:00 AM
@@ -126,6 +127,7 @@ function DayCard({
 }) {
   const router = useRouter();
   const stops = useTrip((s) => s.stops);
+  const weather = useWeather((s) => s.byDay[day.id]);
   const reorderStops = useTrip((s) => s.reorderStops);
   const setSelectedDay = useTrip((s) => s.setSelectedDay);
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
@@ -192,7 +194,17 @@ function DayCard({
             <p className="text-sm font-semibold leading-tight tracking-tight">
               {day.title || `Day ${day.seq}`}
             </p>
-            <p className="eyebrow mt-1">{fmtDate(day.date)}</p>
+            <p className="eyebrow mt-1 flex items-center gap-1.5">
+              {fmtDate(day.date)}
+              {weather && (
+                <span className="flex items-center gap-1 normal-case text-fg-muted">
+                  <WeatherIcon kind={weatherKind(weather.code)} size={12} strokeWidth={2} />
+                  <span className="tnum tracking-normal">
+                    {weather.tMaxF}°/{weather.tMinF}°
+                  </span>
+                </span>
+              )}
+            </p>
           </div>
         </div>
         <div className="text-right">

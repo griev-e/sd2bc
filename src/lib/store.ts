@@ -9,6 +9,7 @@ import type {
   Day,
   DayRoute,
   Expense,
+  GameEvent,
   PackingItem,
   Profile,
   RouteSegment,
@@ -17,7 +18,14 @@ import type {
   ViaPoint,
 } from "./types";
 
-type Tables = "days" | "stops" | "via_points" | "expenses" | "packing_items" | "trips";
+type Tables =
+  | "days"
+  | "stops"
+  | "via_points"
+  | "expenses"
+  | "packing_items"
+  | "trips"
+  | "game_events";
 
 interface TripState {
   loaded: boolean;
@@ -30,6 +38,7 @@ interface TripState {
   expenses: Expense[];
   packing: PackingItem[];
   activity: ActivityEntry[];
+  gameEvents: GameEvent[];
 
   routes: Record<string, DayRoute>;
   routesPending: boolean;
@@ -82,6 +91,12 @@ interface TripState {
   deletePackingItem: (id: string) => Promise<void>;
 
   refreshActivity: () => Promise<void>;
+
+  // road games
+  addGameEvent: (
+    e: Pick<GameEvent, "game" | "kind"> & { key?: string | null; value?: Record<string, unknown> },
+  ) => Promise<void>;
+  deleteGameEvent: (id: string) => Promise<void>;
 }
 
 let channel: ReturnType<ReturnType<typeof supabase>["channel"]> | null = null;
@@ -236,6 +251,9 @@ export const useTrip = create<TripState>((set, get) => {
       case "packing_items":
         set({ packing: upsert(s.packing) });
         break;
+      case "game_events":
+        set({ gameEvents: upsert(s.gameEvents) });
+        break;
       case "trips":
         if (evt !== "DELETE") set({ trip: { ...(s.trip ?? {}), ...row } as Trip });
         break;
@@ -253,6 +271,7 @@ export const useTrip = create<TripState>((set, get) => {
     expenses: [],
     packing: [],
     activity: [],
+    gameEvents: [],
     routes: {},
     routesPending: false,
     routeError: null,
@@ -264,7 +283,7 @@ export const useTrip = create<TripState>((set, get) => {
       const db = supabase();
       set({ userId });
 
-      const [profiles, trips, days, stops, vias, expenses, packing] = await Promise.all([
+      const [profiles, trips, days, stops, vias, expenses, packing, games] = await Promise.all([
         db.from("profiles").select("*"),
         db.from("trips").select("*").limit(1),
         db.from("days").select("*"),
@@ -272,6 +291,7 @@ export const useTrip = create<TripState>((set, get) => {
         db.from("via_points").select("*"),
         db.from("expenses").select("*").order("spent_on", { ascending: false }),
         db.from("packing_items").select("*"),
+        db.from("game_events").select("*").order("created_at", { ascending: true }),
       ]);
 
       set({
@@ -282,6 +302,7 @@ export const useTrip = create<TripState>((set, get) => {
         viaPoints: (vias.data as ViaPoint[]) ?? [],
         expenses: (expenses.data as Expense[]) ?? [],
         packing: (packing.data as PackingItem[]) ?? [],
+        gameEvents: (games.data as GameEvent[]) ?? [],
         loaded: true,
       });
       scheduleRoutes(50);
@@ -301,6 +322,7 @@ export const useTrip = create<TripState>((set, get) => {
           "via_points",
           "expenses",
           "packing_items",
+          "game_events",
         ];
         for (const table of tables) {
           channel.on(
@@ -558,6 +580,35 @@ export const useTrip = create<TripState>((set, get) => {
     deletePackingItem: async (id) => {
       set({ packing: get().packing.filter((p) => p.id !== id) });
       await supabase().from("packing_items").delete().eq("id", id);
+    },
+
+    addGameEvent: async (e) => {
+      const s = get();
+      const row: GameEvent = {
+        id: crypto.randomUUID(),
+        game: e.game,
+        kind: e.kind,
+        key: e.key ?? null,
+        value: e.value ?? {},
+        created_by: s.userId,
+        created_at: new Date().toISOString(),
+      };
+      set({ gameEvents: [...s.gameEvents, row] });
+      const { error } = await supabase().from("game_events").insert({
+        id: row.id,
+        game: row.game,
+        kind: row.kind,
+        key: row.key,
+        value: row.value,
+        created_by: s.userId,
+      });
+      // e.g. a claim raced the other phone and lost the unique index
+      if (error) set({ gameEvents: get().gameEvents.filter((x) => x.id !== row.id) });
+    },
+
+    deleteGameEvent: async (id) => {
+      set({ gameEvents: get().gameEvents.filter((x) => x.id !== id) });
+      await supabase().from("game_events").delete().eq("id", id);
     },
 
     refreshActivity: async () => {
