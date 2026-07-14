@@ -41,6 +41,9 @@ export default function WordRushGame() {
   const [score, setScore] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(ROUND_SECONDS);
   const savedRef = useRef(false);
+  // best before this round started — the saved score would otherwise make
+  // every tie look like a new record
+  const [prevBest, setPrevBest] = useState(0);
 
   // next card — no repeats until all 50 have been seen, then reshuffle
   function advance() {
@@ -75,6 +78,7 @@ export default function WordRushGame() {
   }, [phase, score, addGameEvent]);
 
   function start() {
+    setPrevBest(best(me?.id));
     setRound((r) => r + 1);
     setDeck(shuffleDeck());
     setCardIdx(0);
@@ -149,7 +153,7 @@ export default function WordRushGame() {
               <p className="eyebrow">Time!</p>
               <p className="display tnum mt-1 text-[44px] leading-none">{score}</p>
               <p className="mt-2 text-xs text-fg-muted">
-                {score > best(me?.id) - 1 && score > 0
+                {score > prevBest && score > 0
                   ? "New personal best — it's on the record."
                   : "Logged. Rematch?"}
               </p>

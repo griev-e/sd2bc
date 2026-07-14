@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import { useTrip } from "./store";
 import type { Day, DayRoute, Stop } from "./types";
 
@@ -47,7 +46,7 @@ function stayOf(stop: Stop | undefined): number {
  * own start_time re-anchors the chain from that point on (a reservation or
  * check-in that the estimate must bend to).
  */
-export function computeSchedule(
+function computeSchedule(
   orderedDays: Day[],
   stops: Stop[],
   routes: Record<string, DayRoute>,
@@ -96,13 +95,34 @@ export function computeSchedule(
   return result;
 }
 
+// One shared cache for the whole app — the schedule is consumed by every
+// DayCard, the stop editor, and the weather sync, and store arrays are
+// immutable, so a reference check on the inputs is enough to reuse the result.
+let memoDays: Day[] | null = null;
+let memoStops: Stop[] | null = null;
+let memoRoutes: Record<string, DayRoute> | null = null;
+let memoResult: Map<string, StopSchedule> = new Map();
+
+/** Memoized trip-wide schedule for the given store snapshot. */
+export function getSchedule(
+  days: Day[],
+  stops: Stop[],
+  routes: Record<string, DayRoute>,
+): Map<string, StopSchedule> {
+  if (days !== memoDays || stops !== memoStops || routes !== memoRoutes) {
+    memoDays = days;
+    memoStops = stops;
+    memoRoutes = routes;
+    const ordered = [...days].sort((a, b) => a.seq - b.seq);
+    memoResult = computeSchedule(ordered, stops, routes);
+  }
+  return memoResult;
+}
+
 /** Live trip-wide schedule, recomputed as stops / stays / routes change. */
 export function useSchedule(): Map<string, StopSchedule> {
   const days = useTrip((s) => s.days);
   const stops = useTrip((s) => s.stops);
   const routes = useTrip((s) => s.routes);
-  return useMemo(() => {
-    const ordered = [...days].sort((a, b) => a.seq - b.seq);
-    return computeSchedule(ordered, stops, routes);
-  }, [days, stops, routes]);
+  return getSchedule(days, stops, routes);
 }

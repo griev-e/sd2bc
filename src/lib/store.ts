@@ -8,7 +8,6 @@ import type {
   ActivityEntry,
   Day,
   DayRoute,
-  Expense,
   GameEvent,
   PackingItem,
   Profile,
@@ -22,7 +21,6 @@ type Tables =
   | "days"
   | "stops"
   | "via_points"
-  | "expenses"
   | "packing_items"
   | "trips"
   | "game_events"
@@ -36,7 +34,6 @@ interface TripState {
   days: Day[];
   stops: Stop[];
   viaPoints: ViaPoint[];
-  expenses: Expense[];
   packing: PackingItem[];
   activity: ActivityEntry[];
   gameEvents: GameEvent[];
@@ -80,15 +77,6 @@ interface TripState {
 
   // profile (display name / photo)
   updateProfile: (patch: Partial<Pick<Profile, "display_name" | "avatar_url">>) => Promise<void>;
-
-  // expenses
-  addExpense: (e: {
-    category: Expense["category"];
-    amount: number;
-    note: string;
-    spent_on: string;
-  }) => Promise<void>;
-  deleteExpense: (id: string) => Promise<void>;
 
   // packing
   togglePacking: (id: string, checked: boolean) => Promise<void>;
@@ -136,9 +124,14 @@ export function dayRoutePoints(
   stops: Stop[],
   vias: ViaPoint[],
 ): RoutePoint[] {
+  const viasByStop = new Map<string, ViaPoint[]>();
+  for (const v of vias) {
+    const list = viasByStop.get(v.after_stop_id);
+    if (list) list.push(v);
+    else viasByStop.set(v.after_stop_id, [v]);
+  }
   const viasFor = (stopId: string): RoutePoint[] =>
-    vias
-      .filter((v) => v.after_stop_id === stopId)
+    (viasByStop.get(stopId) ?? [])
       .sort((a, b) => a.seq - b.seq)
       .map((v) => ({ lngLat: [v.lng, v.lat] as LngLat, stopId: null, viaId: v.id }));
 
@@ -168,6 +161,45 @@ export const useTrip = create<TripState>((set, get) => {
     routeTimer = setTimeout(() => void computeRoutes(), delay);
   }
 
+  async function computeDayRoute(day: Day, prevDay: Day | null, stops: Stop[], vias: ViaPoint[]): Promise<DayRoute> {
+    const points = dayRoutePoints(day, prevDay, stops, vias);
+    if (points.length < 2) {
+      return { dayId: day.id, coordinates: [], segments: [], distanceM: 0, durationS: 0 };
+    }
+    const route = await fetchRoute(points.map((p) => p.lngLat));
+
+    // Fold via-point legs into stop→stop segments.
+    const segments: RouteSegment[] = [];
+    let fromStop = points[0].stopId!;
+    let dist = 0;
+    let dur = 0;
+    for (let leg = 0; leg < route.legs.length; leg++) {
+      dist += route.legs[leg].distance;
+      dur += route.legs[leg].duration;
+      const target = points[leg + 1];
+      if (target.stopId) {
+        segments.push({
+          fromStopId: fromStop,
+          toStopId: target.stopId,
+          distanceM: dist,
+          durationS: dur,
+        });
+        fromStop = target.stopId;
+        dist = 0;
+        dur = 0;
+      }
+    }
+    return {
+      dayId: day.id,
+      coordinates: route.coordinates,
+      segments,
+      distanceM: route.distance,
+      durationS: route.duration,
+    };
+  }
+
+  // All days route concurrently (capped so a cold cache doesn't hammer the
+  // public OSRM server); each day's line appears as soon as it resolves.
   async function computeRoutes() {
     const { days, stops, viaPoints } = get();
     const run = ++routeRun;
@@ -175,61 +207,33 @@ export const useTrip = create<TripState>((set, get) => {
     set({ routesPending: true, routeError: null });
 
     const next: Record<string, DayRoute> = {};
-    try {
-      for (let i = 0; i < ordered.length; i++) {
-        const day = ordered[i];
-        const points = dayRoutePoints(day, i > 0 ? ordered[i - 1] : null, stops, viaPoints);
-        if (points.length < 2) {
-          next[day.id] = {
-            dayId: day.id,
-            coordinates: [],
-            segments: [],
-            distanceM: 0,
-            durationS: 0,
-          };
-          continue;
-        }
-        const route = await fetchRoute(points.map((p) => p.lngLat));
-        if (run !== routeRun) return; // superseded by a newer edit
+    let firstError: unknown = null;
+    let cursor = 0;
 
-        // Fold via-point legs into stop→stop segments.
-        const segments: RouteSegment[] = [];
-        let fromStop = points[0].stopId!;
-        let dist = 0;
-        let dur = 0;
-        for (let leg = 0; leg < route.legs.length; leg++) {
-          dist += route.legs[leg].distance;
-          dur += route.legs[leg].duration;
-          const target = points[leg + 1];
-          if (target.stopId) {
-            segments.push({
-              fromStopId: fromStop,
-              toStopId: target.stopId,
-              distanceM: dist,
-              durationS: dur,
-            });
-            fromStop = target.stopId;
-            dist = 0;
-            dur = 0;
-          }
+    const worker = async () => {
+      while (cursor < ordered.length && run === routeRun) {
+        const i = cursor++;
+        const day = ordered[i];
+        try {
+          const route = await computeDayRoute(day, i > 0 ? ordered[i - 1] : null, stops, viaPoints);
+          if (run !== routeRun) return; // superseded by a newer edit
+          next[day.id] = route;
+          set({ routes: { ...get().routes, [day.id]: route } });
+        } catch (err) {
+          firstError ??= err;
         }
-        next[day.id] = {
-          dayId: day.id,
-          coordinates: route.coordinates,
-          segments,
-          distanceM: route.distance,
-          durationS: route.duration,
-        };
-        set({ routes: { ...get().routes, [day.id]: next[day.id] } });
       }
-      if (run === routeRun) set({ routes: next, routesPending: false });
-    } catch (err) {
-      if (run === routeRun) {
-        set({
-          routesPending: false,
-          routeError: err instanceof Error ? err.message : "Routing failed",
-        });
-      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, ordered.length) }, worker));
+
+    if (run !== routeRun) return;
+    if (firstError) {
+      set({
+        routesPending: false,
+        routeError: firstError instanceof Error ? firstError.message : "Routing failed",
+      });
+    } else {
+      set({ routes: next, routesPending: false });
     }
   }
 
@@ -258,9 +262,6 @@ export const useTrip = create<TripState>((set, get) => {
         set({ viaPoints: upsert(s.viaPoints) });
         scheduleRoutes();
         break;
-      case "expenses":
-        set({ expenses: upsert(s.expenses) });
-        break;
       case "packing_items":
         set({ packing: upsert(s.packing) });
         break;
@@ -284,7 +285,6 @@ export const useTrip = create<TripState>((set, get) => {
     days: [],
     stops: [],
     viaPoints: [],
-    expenses: [],
     packing: [],
     activity: [],
     gameEvents: [],
@@ -299,13 +299,12 @@ export const useTrip = create<TripState>((set, get) => {
       const db = supabase();
       set({ userId });
 
-      const [profiles, trips, days, stops, vias, expenses, packing, games] = await Promise.all([
+      const [profiles, trips, days, stops, vias, packing, games] = await Promise.all([
         db.from("profiles").select("*"),
         db.from("trips").select("*").limit(1),
         db.from("days").select("*"),
         db.from("stops").select("*"),
         db.from("via_points").select("*"),
-        db.from("expenses").select("*").order("spent_on", { ascending: false }),
         db.from("packing_items").select("*"),
         db.from("game_events").select("*").order("created_at", { ascending: true }),
       ]);
@@ -316,7 +315,6 @@ export const useTrip = create<TripState>((set, get) => {
         days: (days.data as Day[]) ?? [],
         stops: (stops.data as Stop[]) ?? [],
         viaPoints: (vias.data as ViaPoint[]) ?? [],
-        expenses: (expenses.data as Expense[]) ?? [],
         packing: (packing.data as PackingItem[]) ?? [],
         gameEvents: (games.data as GameEvent[]) ?? [],
         loaded: true,
@@ -336,7 +334,6 @@ export const useTrip = create<TripState>((set, get) => {
           "days",
           "stops",
           "via_points",
-          "expenses",
           "packing_items",
           "game_events",
           "profiles",
@@ -369,13 +366,15 @@ export const useTrip = create<TripState>((set, get) => {
     addStop: async (dayId, stop) => {
       const s = get();
       if (!s.trip) return;
-      const dayStops = s.stops.filter((x) => x.day_id === dayId);
+      // max+1, not count+1 — deletions leave seq gaps and count+1 would collide
+      const nextSeq =
+        s.stops.reduce((m, x) => (x.day_id === dayId && x.seq > m ? x.seq : m), 0) + 1;
       const now = new Date().toISOString();
       const row: Stop = {
         id: crypto.randomUUID(),
         trip_id: s.trip.id,
         day_id: dayId,
-        seq: dayStops.length + 1,
+        seq: nextSeq,
         name: stop.name,
         lat: stop.lat,
         lng: stop.lng,
@@ -433,11 +432,11 @@ export const useTrip = create<TripState>((set, get) => {
 
     reorderStops: async (dayId, orderedIds) => {
       const s = get();
-      const updated = s.stops.map((x) =>
-        x.day_id === dayId && orderedIds.includes(x.id)
-          ? { ...x, seq: orderedIds.indexOf(x.id) + 1 }
-          : x,
-      );
+      const seqById = new Map(orderedIds.map((id, i) => [id, i + 1]));
+      const updated = s.stops.map((x) => {
+        const seq = x.day_id === dayId ? seqById.get(x.id) : undefined;
+        return seq !== undefined ? { ...x, seq } : x;
+      });
       set({ stops: updated });
       const db = supabase();
       await Promise.all(
@@ -449,8 +448,8 @@ export const useTrip = create<TripState>((set, get) => {
 
     moveStopToDay: async (stopId, dayId) => {
       const s = get();
-      const target = s.stops.filter((x) => x.day_id === dayId);
-      const seq = target.length + 1;
+      const seq =
+        s.stops.reduce((m, x) => (x.day_id === dayId && x.seq > m ? x.seq : m), 0) + 1;
       set({
         stops: s.stops.map((x) => (x.id === stopId ? { ...x, day_id: dayId, seq } : x)),
       });
@@ -578,41 +577,6 @@ export const useTrip = create<TripState>((set, get) => {
       await supabase().from("profiles").update(patch).eq("id", s.userId);
     },
 
-    addExpense: async (e) => {
-      const s = get();
-      if (!s.trip) return;
-      const now = new Date().toISOString();
-      const row: Expense = {
-        id: crypto.randomUUID(),
-        trip_id: s.trip.id,
-        category: e.category,
-        amount: e.amount,
-        note: e.note,
-        spent_on: e.spent_on,
-        created_by: s.userId,
-        updated_by: s.userId,
-        created_at: now,
-        updated_at: now,
-      };
-      set({ expenses: [row, ...s.expenses] });
-      const { error } = await supabase().from("expenses").insert({
-        id: row.id,
-        trip_id: row.trip_id,
-        category: row.category,
-        amount: row.amount,
-        note: row.note,
-        spent_on: row.spent_on,
-        created_by: s.userId,
-        updated_by: s.userId,
-      });
-      if (error) set({ expenses: get().expenses.filter((x) => x.id !== row.id) });
-    },
-
-    deleteExpense: async (id) => {
-      set({ expenses: get().expenses.filter((x) => x.id !== id) });
-      await supabase().from("expenses").delete().eq("id", id);
-    },
-
     togglePacking: async (id, checked) => {
       const s = get();
       set({
@@ -711,11 +675,6 @@ export const useTrip = create<TripState>((set, get) => {
     },
   };
 });
-
-/** Days in display order. */
-export function useOrderedDays(): Day[] {
-  return sortDays(useTrip((s) => s.days));
-}
 
 export function stopsForDay(stops: Stop[], dayId: string): Stop[] {
   return sortStops(stops.filter((s) => s.day_id === dayId));

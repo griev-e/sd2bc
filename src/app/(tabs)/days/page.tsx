@@ -143,7 +143,7 @@ function DayCard({
   const setSelectedDay = useTrip((s) => s.setSelectedDay);
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
 
-  const dayStops = stopsForDay(stops, day.id);
+  const dayStops = useMemo(() => stopsForDay(stops, day.id), [stops, day.id]);
   const color = dayColor(index, total);
 
   const sensors = useSensors(

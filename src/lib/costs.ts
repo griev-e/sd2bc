@@ -1,10 +1,9 @@
-import type { Expense, ExpenseCategory } from "./types";
+import type { ExpenseCategory } from "./types";
 import type { Region } from "./geo";
 
 /*
-  Seed cost model — clearly-labeled 2026 estimates for the west coast corridor.
-  These are starting points; the estimator blends in real logged expenses as
-  the trip happens (3+ entries in a category → trust our own average).
+  Seed cost model — clearly-labeled 2026 estimates for the west coast corridor,
+  sharpened by real route miles and overnight stays as the plan takes shape.
 */
 
 /** Regular gas, USD per gallon — AAA state averages, July 2026 (BC converted from ~C$1.80/L). */
@@ -47,18 +46,6 @@ export const CATEGORY_LABEL: Record<ExpenseCategory, string> = {
   activities: "Activities",
   misc: "Misc",
 };
-
-export interface CategoryProjection {
-  category: ExpenseCategory;
-  /** pre-trip seed estimate for the whole trip */
-  estimate: number;
-  /** logged so far */
-  actual: number;
-  /** actual + blended forecast of the remainder */
-  projected: number;
-  /** true once the projection uses our real spending average */
-  blended: boolean;
-}
 
 export interface SeedInputs {
   /** miles driven per region across the whole route */
@@ -105,36 +92,4 @@ export function seedEstimate(cat: ExpenseCategory, s: SeedInputs): number {
     case "misc":
       return MISC_PER_DAY * s.totalDays;
   }
-}
-
-/**
- * Progressive accuracy: before the trip the projection is the seed estimate.
- * Once underway, remaining days are forecast with our real daily average for
- * a category (if we have 3+ entries), otherwise the seed daily rate.
- */
-export function projectCategory(
-  cat: ExpenseCategory,
-  expenses: Expense[],
-  s: SeedInputs,
-  daysElapsed: number, // 0 before trip, capped at totalDays
-): CategoryProjection {
-  const estimate = seedEstimate(cat, s);
-  const entries = expenses.filter((e) => e.category === cat);
-  const actual = entries.reduce((sum, e) => sum + Number(e.amount), 0);
-
-  const remainingDays = Math.max(0, s.totalDays - daysElapsed);
-  if (daysElapsed <= 0) {
-    return { category: cat, estimate, actual, projected: Math.max(estimate, actual), blended: false };
-  }
-
-  const seedDaily = estimate / s.totalDays;
-  const blended = entries.length >= 3;
-  const daily = blended ? actual / Math.max(1, daysElapsed) : seedDaily;
-  return {
-    category: cat,
-    estimate,
-    actual,
-    projected: actual + daily * remainingDays,
-    blended,
-  };
 }

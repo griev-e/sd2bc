@@ -4,8 +4,9 @@ export function fmtMiles(meters: number): string {
 }
 
 export function fmtDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.round((seconds % 3600) / 60);
+  const totalMin = Math.round(seconds / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
   if (h === 0) return `${m} min`;
   return `${h}h ${m.toString().padStart(2, "0")}m`;
 }
@@ -48,17 +49,12 @@ export function daysUntil(iso: string): number {
 
 /** "9:41 AM" for minutes-since-midnight. */
 export function fmtClock(minutes: number): string {
-  const h24 = Math.floor(minutes / 60) % 24;
-  const m = Math.round(minutes % 60);
+  const total = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  const h24 = Math.floor(total / 60);
+  const m = total % 60;
   const ampm = h24 >= 12 ? "PM" : "AM";
   const h = h24 % 12 === 0 ? 12 : h24 % 12;
   return `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
-}
-
-/** "2:30 PM" from a stored "14:30". */
-export function fmtTimeOfDay(hhmm: string): string {
-  const [h, m] = hhmm.split(":").map(Number);
-  return fmtClock(h * 60 + m);
 }
 
 /** "1h 30m" / "45m" for a planned length of stay. */

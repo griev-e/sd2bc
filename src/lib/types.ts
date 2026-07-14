@@ -83,19 +83,6 @@ export interface ViaPoint {
   created_at: string;
 }
 
-export interface Expense {
-  id: string;
-  trip_id: string;
-  category: ExpenseCategory;
-  amount: number;
-  note: string;
-  spent_on: string;
-  created_by: string | null;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface PackingItem {
   id: string;
   trip_id: string;
