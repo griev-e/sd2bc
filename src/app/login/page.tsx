@@ -4,11 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { IconWave } from "@/components/Icons";
 import { supabase, usernameToEmail } from "@/lib/supabase";
-import { SUPABASE_URL } from "@/lib/config";
 
+/**
+ * Sign-in only — the two Coastline accounts are pre-provisioned and the
+ * signup edge function is capped, so there is no account-creation UI.
+ */
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,24 +21,11 @@ export default function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      if (mode === "signup") {
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/signup`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? "Signup failed");
-      }
       const { error: signInError } = await supabase().auth.signInWithPassword({
         email: usernameToEmail(username),
         password,
       });
-      if (signInError) {
-        throw new Error(
-          mode === "login" ? "Wrong username or password" : signInError.message,
-        );
-      }
+      if (signInError) throw new Error("Wrong username or password");
       router.replace("/map");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -97,9 +86,8 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="password"
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            autoComplete="current-password"
             required
-            minLength={8}
             className="field"
           />
           {error && <p className="px-1 text-sm text-danger">{error}</p>}
@@ -108,32 +96,13 @@ export default function LoginPage() {
             disabled={busy}
             className="btn-primary pressable h-12 w-full rounded-xl font-semibold disabled:opacity-60"
           >
-            {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
+            {busy ? "…" : "Sign in"}
           </button>
         </form>
 
-        <button
-          onClick={() => {
-            setMode(mode === "login" ? "signup" : "login");
-            setError(null);
-          }}
-          className="mt-6 w-full text-center text-sm text-fg-muted"
-        >
-          {mode === "login" ? (
-            <>
-              First time here? <span className="font-semibold text-accent">Create account</span>
-            </>
-          ) : (
-            <>
-              Already aboard? <span className="font-semibold text-accent">Sign in</span>
-            </>
-          )}
-        </button>
-        {mode === "signup" && (
-          <p className="mt-3 text-center text-xs text-fg-faint">
-            Two seats only — you and your co-pilot.
-          </p>
-        )}
+        <p className="mt-6 text-center text-xs text-fg-faint">
+          Private trip — two seats, both spoken for.
+        </p>
       </div>
 
       <p className="eyebrow relative pb-8 text-center">est. july 27, 2026</p>
