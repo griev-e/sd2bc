@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Sheet from "./Sheet";
 import AttributionDot from "./Attribution";
 import { StopKindIcon } from "./CategoryIcon";
+import { IconLink } from "./Icons";
 import { KIND_COLOR } from "@/lib/colors";
 import { useTrip } from "@/lib/store";
-import { fmtDate } from "@/lib/format";
 import type { Stop, StopKind } from "@/lib/types";
 
 export const KIND_META: { key: StopKind; label: string }[] = [
@@ -30,38 +30,56 @@ export default function StopEditSheet({
 }) {
   return (
     <Sheet open={open && stop !== null} onClose={onClose} title="Stop details">
-      {stop && <StopForm key={stop.id} stop={stop} onClose={onClose} />}
+      {stop && <StopForm key={stop.id} stopId={stop.id} onClose={onClose} />}
     </Sheet>
   );
 }
 
-/** Mounted fresh per stop (keyed), so field state initializes from props. */
-function StopForm({ stop, onClose }: { stop: Stop; onClose: () => void }) {
-  const days = useTrip((s) => s.days);
+/**
+ * Reads the *live* stop from the store (not a passed snapshot) so type,
+ * overnight, and lodging toggles reflect instantly. Text fields keep local
+ * state and commit on blur / unmount.
+ */
+function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) {
+  const stop = useTrip((s) => s.stops.find((x) => x.id === stopId));
   const updateStop = useTrip((s) => s.updateStop);
   const deleteStop = useTrip((s) => s.deleteStop);
-  const moveStopToDay = useTrip((s) => s.moveStopToDay);
 
-  const [name, setName] = useState(stop.name);
-  const [notes, setNotes] = useState(stop.notes);
+  const [name, setName] = useState(stop?.name ?? "");
+  const [notes, setNotes] = useState(stop?.notes ?? "");
+  const [lodgingUrl, setLodgingUrl] = useState(stop?.lodging_url ?? "");
+  const [lodgingCost, setLodgingCost] = useState(
+    stop?.lodging_cost != null ? String(stop.lodging_cost) : "",
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const orderedDays = [...days].sort((a, b) => a.seq - b.seq);
-
   function commitText() {
+    if (!stop) return;
     const patch: Partial<Stop> = {};
     if (name.trim() && name !== stop.name) patch.name = name.trim();
     if (notes !== stop.notes) patch.notes = notes;
+
+    const url = lodgingUrl.trim();
+    if (url !== (stop.lodging_url ?? "")) patch.lodging_url = url || null;
+
+    const parsed = lodgingCost.trim() ? Math.round(Number(lodgingCost.replace(/[^0-9.]/g, ""))) : 0;
+    const nextCost = parsed > 0 ? parsed : null;
+    if (nextCost !== (stop.lodging_cost ?? null)) patch.lodging_cost = nextCost;
+
     if (Object.keys(patch).length > 0) void updateStop(stop.id, patch);
   }
 
-  // If the sheet is dismissed while an input still has focus, blur never
-  // fires — commit any pending text on unmount instead.
+  // The sheet can dismiss while an input still has focus (blur never fires) —
+  // commit any pending text on unmount.
   const commitRef = useRef(commitText);
   useEffect(() => {
     commitRef.current = commitText;
   });
   useEffect(() => () => commitRef.current(), []);
+
+  if (!stop) return null;
+
+  const isLodging = stop.is_overnight || stop.kind === "lodging";
 
   return (
     <div className="space-y-5">
@@ -117,34 +135,75 @@ function StopForm({ stop, onClose }: { stop: Stop; onClose: () => void }) {
         />
       </label>
 
-      <div>
-        <p className="eyebrow mb-2 px-0.5">Day</p>
-        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
-          {orderedDays.map((d) => (
-            <button
-              key={d.id}
-              onClick={() => stop.day_id !== d.id && void moveStopToDay(stop.id, d.id)}
-              className={`pressable flex-shrink-0 rounded-xl px-3 py-2 text-xs ${
-                stop.day_id === d.id
-                  ? "btn-primary"
-                  : "border border-hairline text-fg-muted"
-              }`}
-            >
-              <span className="tnum font-semibold">Day {d.seq}</span>
-              <span className="ml-1 opacity-70">{fmtDate(d.date).slice(5)}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* lodging details — only when this is a place we sleep */}
+      {isLodging && (
+        <div className="space-y-3">
+          <label className="card flex min-h-[52px] items-center justify-between rounded-2xl px-4 py-3">
+            <span>
+              <span className="block text-sm font-medium">Free stay</span>
+              <span className="text-xs text-fg-faint">Family or friends — $0 in the budget</span>
+            </span>
+            <input
+              type="checkbox"
+              className="check-pill"
+              checked={stop.lodging_free}
+              onChange={(e) => void updateStop(stop.id, { lodging_free: e.target.checked })}
+            />
+          </label>
 
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        onBlur={commitText}
-        placeholder="Notes — reservations, ideas, links…"
-        rows={3}
-        className="field h-auto w-full py-3"
-      />
+          {!stop.lodging_free && (
+            <div>
+              <p className="eyebrow mb-2 px-0.5">Nightly cost</p>
+              <input
+                value={lodgingCost}
+                onChange={(e) => setLodgingCost(e.target.value)}
+                onBlur={commitText}
+                placeholder="Leave blank for the regional estimate"
+                inputMode="numeric"
+                className="field"
+              />
+            </div>
+          )}
+
+          <div>
+            <p className="eyebrow mb-2 px-0.5">Booking link</p>
+            <div className="flex items-center gap-2">
+              <input
+                value={lodgingUrl}
+                onChange={(e) => setLodgingUrl(e.target.value)}
+                onBlur={commitText}
+                placeholder="Paste an Expedia / hotel itinerary link"
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="field flex-1"
+              />
+              {stop.lodging_url && (
+                <a
+                  href={stop.lodging_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open booking link"
+                  className="btn-ghost pressable flex h-[46px] w-[46px] flex-shrink-0 items-center justify-center rounded-xl text-accent"
+                >
+                  <IconLink size={17} />
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <p className="eyebrow mb-2 px-0.5">Notes</p>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={commitText}
+          placeholder="Reservations, ideas, links, who to call…"
+          rows={7}
+          className="field h-auto w-full resize-none py-3 leading-6"
+        />
+      </div>
 
       <button
         onClick={() => {

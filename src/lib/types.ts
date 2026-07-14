@@ -49,6 +49,12 @@ export interface Stop {
   kind: StopKind;
   is_overnight: boolean;
   notes: string;
+  /** Booking / itinerary link for an overnight stay. */
+  lodging_url: string | null;
+  /** Free stay (e.g. staying with family) — counts $0 in the budget. */
+  lodging_free: boolean;
+  /** Known actual nightly cost; overrides the regional estimate. */
+  lodging_cost: number | null;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;

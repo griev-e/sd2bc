@@ -312,3 +312,11 @@ export function IconChevronDown({ size = 18, className, strokeWidth = 1.8 }: Ico
     </svg>
   );
 }
+
+export function IconLink({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
+      <path d="M9.5 14.5 14.5 9.5M8.5 11 6.8 12.7a3.3 3.3 0 0 0 4.7 4.7l1.7-1.7M15.5 13l1.7-1.7a3.3 3.3 0 0 0-4.7-4.7L10.8 8.3" />
+    </svg>
+  );
+}

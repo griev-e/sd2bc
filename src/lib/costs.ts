@@ -65,8 +65,20 @@ export interface SeedInputs {
   mpg: number;
   travelers: number;
   totalDays: number;
-  /** overnight counts */
-  nights: { region: Region; bigCity: boolean }[];
+  /** one entry per overnight stay */
+  nights: { region: Region; bigCity: boolean; free?: boolean; cost?: number | null }[];
+}
+
+/** Cost of a single night: $0 if free, actual cost if known, else regional estimate. */
+export function nightCost(n: {
+  region: Region;
+  bigCity: boolean;
+  free?: boolean;
+  cost?: number | null;
+}): number {
+  if (n.free) return 0;
+  if (n.cost != null && n.cost > 0) return n.cost;
+  return LODGING_PER_NIGHT[n.region] + (n.bigCity ? BIG_CITY_BUMP : 0);
 }
 
 export function seedEstimate(cat: ExpenseCategory, s: SeedInputs): number {
@@ -80,10 +92,7 @@ export function seedEstimate(cat: ExpenseCategory, s: SeedInputs): number {
       return total;
     }
     case "lodging":
-      return s.nights.reduce(
-        (sum, n) => sum + LODGING_PER_NIGHT[n.region] + (n.bigCity ? BIG_CITY_BUMP : 0),
-        0,
-      );
+      return s.nights.reduce((sum, n) => sum + nightCost(n), 0);
     case "food":
       return FOOD_PER_PERSON_DAY * s.travelers * s.totalDays;
     case "activities":
