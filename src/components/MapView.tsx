@@ -290,7 +290,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         const el = document.createElement("div");
         el.className = "weather-badge";
         el.style.opacity = dim ? "0.35" : "1";
-        el.textContent = `${WEATHER_EMOJI[weatherKind(w.code)]} ${w.tMaxF}°`;
+        el.textContent = `${WEATHER_EMOJI[weatherKind(w.code)]} ${w.tempF}°`;
         // float above the stop dot; never intercept the stop's tap
         const marker = new maplibregl.Marker({
           element: el,
