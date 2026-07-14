@@ -59,8 +59,10 @@ export default function BudgetPage() {
       travelers,
       totalDays: Math.max(1, days.length),
       nights,
+      foodPerDay: trip?.food_per_day ?? FOOD_PER_PERSON_DAY,
+      activitiesPerDay: trip?.activities_per_day ?? ACTIVITIES_PER_PERSON_DAY,
     };
-  }, [routes, stops, mpg, travelers, days.length]);
+  }, [routes, stops, mpg, travelers, days.length, trip?.food_per_day, trip?.activities_per_day]);
 
   const estimates = useMemo(
     () =>
@@ -101,12 +103,11 @@ export default function BudgetPage() {
         : 0;
       byCat.gas.push(gas);
       byCat.lodging.push(lodging);
-      byCat.food.push(FOOD_PER_PERSON_DAY * travelers);
-      byCat.activities.push(ACTIVITIES_PER_PERSON_DAY * travelers);
-      byCat.misc.push(MISC_PER_DAY);
+      byCat.food.push(seed.foodPerDay * travelers);
+      byCat.activities.push(seed.activitiesPerDay * travelers);
     }
     return byCat;
-  }, [orderedDays, routes, stops, mpg, travelers]);
+  }, [orderedDays, routes, stops, mpg, travelers, seed.foodPerDay, seed.activitiesPerDay]);
 
   // one-line "how it's figured" per category
   const assumption: Record<ExpenseCategory, string> = useMemo(() => {
@@ -128,11 +129,11 @@ export default function BudgetPage() {
               freeNights ? ` · ${freeNights} free` : ""
             }${paidNights > 0 ? ` · avg ${fmtMoney(avgNight)}/paid night` : ""}`
           : "No overnights marked yet — flag stops as overnight stays",
-      food: `${fmtMoney(FOOD_PER_PERSON_DAY)}/person/day × ${travelers} × ${nDays} days`,
-      activities: `${fmtMoney(ACTIVITIES_PER_PERSON_DAY)}/person/day × ${travelers} × ${nDays} days`,
+      food: `${fmtMoney(seed.foodPerDay)}/person/day × ${travelers} × ${nDays} days`,
+      activities: `${fmtMoney(seed.activitiesPerDay)}/person/day × ${travelers} × ${nDays} days`,
       misc: `${fmtMoney(MISC_PER_DAY)}/day × ${nDays} days`,
     };
-  }, [totalMiles, mpg, estimates, seed.nights, orderedDays.length, travelers]);
+  }, [totalMiles, mpg, estimates, seed, orderedDays.length, travelers]);
 
   return (
     <div className="min-h-dvh pb-32">
@@ -220,11 +221,26 @@ export default function BudgetPage() {
                 {open && (
                   <div className="rise-in px-3 pb-3.5 pt-1">
                     <p className="text-[11px] leading-4 text-fg-muted">{assumption[c]}</p>
-                    <TrendBars
-                      values={daily[c]}
-                      color={color.fg}
-                      average={estimates[c] / Math.max(1, orderedDays.length)}
-                    />
+                    {c === "food" || c === "activities" ? (
+                      <RateEditor
+                        value={c === "food" ? seed.foodPerDay : seed.activitiesPerDay}
+                        travelers={travelers}
+                        days={orderedDays.length}
+                        color={color.fg}
+                        onChange={(v) =>
+                          trip &&
+                          void updateTrip(
+                            c === "food" ? { food_per_day: v } : { activities_per_day: v },
+                          )
+                        }
+                      />
+                    ) : (
+                      <TrendBars
+                        values={daily[c]}
+                        color={color.fg}
+                        average={estimates[c] / Math.max(1, orderedDays.length)}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -353,6 +369,79 @@ function TrendBars({
         <span className="eyebrow">avg {fmtMoney(average)}/day</span>
         <span className="eyebrow">day {n}</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Editable per-person/day rate for food or activities. Steppers nudge by $5,
+ * the field takes a typed number, and the projected total updates live.
+ */
+function RateEditor({
+  value,
+  travelers,
+  days,
+  color,
+  onChange,
+}: {
+  value: number;
+  travelers: number;
+  days: number;
+  color: string;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [lastValue, setLastValue] = useState(value);
+
+  // Sync the field when the stored value changes (e.g. steppers) — the
+  // recommended "adjust state during render" pattern, no effect needed.
+  if (value !== lastValue) {
+    setLastValue(value);
+    setDraft(String(value));
+  }
+
+  function commit(next: number) {
+    const clamped = Math.max(0, Math.min(2000, Math.round(next)));
+    onChange(clamped);
+  }
+
+  const total = value * travelers * Math.max(1, days);
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => commit(value - 5)}
+          aria-label="Lower rate"
+          className="btn-ghost pressable flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl text-lg font-semibold"
+        >
+          −
+        </button>
+        <div className="relative flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-fg-muted">
+            $
+          </span>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+            onBlur={() => commit(Number(draft) || 0)}
+            inputMode="decimal"
+            aria-label="Per person per day"
+            className="field w-full pl-6 text-center tnum font-semibold"
+            style={{ color }}
+          />
+        </div>
+        <button
+          onClick={() => commit(value + 5)}
+          aria-label="Raise rate"
+          className="btn-ghost pressable flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl text-lg font-semibold"
+        >
+          +
+        </button>
+      </div>
+      <p className="mt-2 text-center text-[11px] text-fg-muted">
+        per person / day · <span className="tnum">{fmtMoney(total)}</span> projected
+      </p>
     </div>
   );
 }

@@ -516,6 +516,7 @@ export const useTrip = create<TripState>((set, get) => {
         date: last ? shiftDate(last.date, 1) : s.trip.start_date,
         title: "",
         notes: "",
+        emoji: null,
         created_at: now,
         updated_at: now,
       };

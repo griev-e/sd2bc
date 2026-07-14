@@ -57,7 +57,20 @@ export async function POST(req: NextRequest) {
       signal: AbortSignal.any([done.signal, AbortSignal.timeout(PER_TRY_TIMEOUT_MS)]),
     });
     if (!res.ok) throw new Error(`status ${res.status}`);
-    return res.json();
+    const data = await res.json();
+    // Overpass answers an overloaded/timed-out query with HTTP 200, an empty
+    // element list, and a `remark`. Treat that as a failure so Promise.any
+    // falls through to a healthier mirror instead of "winning" with no data.
+    if (
+      data &&
+      typeof data === "object" &&
+      "remark" in data &&
+      (!Array.isArray((data as { elements?: unknown[] }).elements) ||
+        (data as { elements: unknown[] }).elements.length === 0)
+    ) {
+      throw new Error(`remark: ${(data as { remark: string }).remark}`);
+    }
+    return data;
   };
 
   try {

@@ -76,7 +76,14 @@ export async function suggestAlongRoute(
     .select("payload, updated_at")
     .eq("key", key)
     .maybeSingle();
-  if (hit && Date.now() - new Date(hit.updated_at).getTime() < 7 * 86400000) {
+  // Serve only non-empty cache hits — an empty payload is almost always a
+  // stale "Overpass was busy" result, so fall through and re-query instead.
+  if (
+    hit &&
+    Date.now() - new Date(hit.updated_at).getTime() < 7 * 86400000 &&
+    Array.isArray(hit.payload) &&
+    hit.payload.length > 0
+  ) {
     return hit.payload as Suggestion[];
   }
 
@@ -97,6 +104,11 @@ export async function suggestAlongRoute(
   });
   if (!res.ok) throw new Error(`Overpass ${res.status}`);
   const json = await res.json();
+  // A remark with no elements = Overpass timed out under load. Surface it as an
+  // error so the UI offers a retry rather than a misleading "nothing here".
+  if (json.remark && (!json.elements || json.elements.length === 0)) {
+    throw new Error(`Overpass busy: ${json.remark}`);
+  }
 
   const seen = new Set<string>();
   const out: Suggestion[] = [];
@@ -122,9 +134,13 @@ export async function suggestAlongRoute(
   out.sort((a, b) => a.offRouteM - b.offRouteM);
   const top = out.slice(0, 25);
 
-  db.from("poi_cache")
-    .upsert({ key, payload: top, updated_at: new Date().toISOString() })
-    .then(() => {});
+  // Never cache an empty result — it's usually a transient Overpass hiccup, and
+  // a cached empty would wrongly say "nothing here" for the next 7 days.
+  if (top.length > 0) {
+    db.from("poi_cache")
+      .upsert({ key, payload: top, updated_at: new Date().toISOString() })
+      .then(() => {});
+  }
 
   return top;
 }
