@@ -5,11 +5,13 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_SATELLITE } from "@/lib/config";
 import { IconLayers } from "./Icons";
+import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor } from "@/lib/colors";
 import { bboxOf, type LngLat } from "@/lib/geo";
 import { insertShapingPoint } from "@/lib/shaping";
 import { stopsForDay, useTrip } from "@/lib/store";
 import { effectiveDark } from "@/lib/theme";
+import { useWeather, WEATHER_EMOJI, weatherKind } from "@/lib/weather";
 import type { Stop } from "@/lib/types";
 
 interface MapViewProps {
@@ -58,6 +60,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   const mapRef = useRef<MLMap | null>(null);
   const stopMarkers = useRef(new Map<string, Marker>());
   const viaMarkers = useRef(new Map<string, Marker>());
+  const weatherMarkers = useRef(new Map<string, Marker>());
   const [mapReady, setMapReady] = useState(false);
   const [selectedVia, setSelectedVia] = useState<string | null>(null);
   const [styleMode, setStyleMode] = useState<StyleMode>(() =>
@@ -96,6 +99,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   const moveViaPoint = useTrip((s) => s.moveViaPoint);
   const deleteViaPoint = useTrip((s) => s.deleteViaPoint);
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
+  const byCluster = useWeather((s) => s.byCluster);
 
   const orderedDays = [...days].sort((a, b) => a.seq - b.seq);
   const dayIndex = new Map(orderedDays.map((d, i) => [d.id, i]));
@@ -162,11 +166,13 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
     const sm = stopMarkers.current;
     const vm = viaMarkers.current;
+    const wm = weatherMarkers.current;
     return () => {
       map.remove();
       mapRef.current = null;
       sm.clear();
       vm.clear();
+      wm.clear();
     };
      
   }, []);
@@ -265,6 +271,39 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       marker.getElement().classList.toggle("selected", id === selectedStopId);
     }
   }, [selectedStopId, stops]);
+
+  // ---- weather badges (one per stop cluster) ----------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    for (const [, m] of weatherMarkers.current) m.remove();
+    weatherMarkers.current.clear();
+
+    for (const day of orderedDays) {
+      const dim = selectedDayId !== null && selectedDayId !== day.id;
+      const dayStops = stopsForDay(stops, day.id);
+      for (const c of clusterStops(dayStops)) {
+        const w = byCluster[clusterKey(day.id, c.repStopId)];
+        if (!w) continue;
+
+        const el = document.createElement("div");
+        el.className = "weather-badge";
+        el.style.opacity = dim ? "0.35" : "1";
+        el.textContent = `${WEATHER_EMOJI[weatherKind(w.code)]} ${w.tMaxF}°`;
+        // float above the stop dot; never intercept the stop's tap
+        const marker = new maplibregl.Marker({
+          element: el,
+          anchor: "bottom",
+          offset: [0, -16],
+        })
+          .setLngLat([c.lng, c.lat])
+          .addTo(map);
+        weatherMarkers.current.set(c.repStopId, marker);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stops, days, selectedDayId, mapReady, byCluster]);
 
   // ---- via (shaping) markers ---------------------------------------------------
   useEffect(() => {

@@ -52,6 +52,18 @@ export const WEATHER_LABEL: Record<WeatherKind, string> = {
   storm: "Thunderstorms",
 };
 
+/** Emoji per weather kind — for DOM contexts (map markers) without React. */
+export const WEATHER_EMOJI: Record<WeatherKind, string> = {
+  sun: "☀️",
+  partly: "🌤️",
+  cloud: "☁️",
+  fog: "🌫️",
+  drizzle: "🌦️",
+  rain: "🌧️",
+  snow: "❄️",
+  storm: "⛈️",
+};
+
 interface WeatherState {
   /** Forecast per trip day (representative point) — powers the day header. */
   byDay: Record<string, DayWeather | undefined>;
