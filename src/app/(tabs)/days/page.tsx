@@ -60,24 +60,19 @@ export default function DaysPage() {
         <div className="glass border-x-0 border-t-0 px-5 pb-3.5 pt-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="eyebrow">Itinerary</p>
-              <h1 className="mt-0.5 text-xl font-bold tracking-tight">The loop</h1>
+              <p className="eyebrow">SAN → YVR → SAN</p>
+              <h1 className="mt-0.5 text-xl font-bold tracking-tight">Itinerary</h1>
             </div>
             <CountdownPill />
           </div>
-          <p className="tnum mt-2 text-xs text-fg-muted">
-            {totals.dist > 0 ? (
-              <>
-                <span className="font-semibold text-fg">{fmtMiles(totals.dist)}</span>
-                {" · "}
-                <span className="font-semibold text-fg">{fmtDuration(totals.dur)}</span>
-                {" behind the wheel"}
-                {routesPending && <span className="text-fg-faint"> · updating…</span>}
-              </>
-            ) : (
-              "Calculating route…"
-            )}
-          </p>
+          <div className="stat-strip mt-3">
+            <Stat value={totals.dist > 0 ? fmtMiles(totals.dist) : "—"} label="total" />
+            <Stat value={totals.dist > 0 ? fmtDuration(totals.dur) : "—"} label="driving" />
+            <Stat
+              value={String(orderedDays.length)}
+              label={routesPending ? "days · updating…" : "days"}
+            />
+          </div>
         </div>
       </header>
 
@@ -99,6 +94,15 @@ export default function DaysPage() {
       <StopEditSheet stop={editStop} open={editStop !== null} onClose={() => setEditStop(null)} />
       <AddStopSheet dayId={addForDay} open={addForDay !== null} onClose={() => setAddForDay(null)} />
       <SuggestSheet dayId={suggestForDay} open={suggestForDay !== null} onClose={() => setSuggestForDay(null)} />
+    </div>
+  );
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <div>
+      <p className="mono text-[13px] font-semibold leading-tight">{value}</p>
+      <p className="eyebrow mt-0.5">{label}</p>
     </div>
   );
 }
@@ -179,11 +183,8 @@ function DayCard({
       >
         <div className="flex items-center gap-3">
           <span
-            className="tnum flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold text-white"
-            style={{
-              background: color,
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,.25), 0 2px 6px rgba(0,0,0,.15)",
-            }}
+            className="mono flex h-9 w-9 items-center justify-center rounded-lg border border-hairline bg-bg-elevated text-[11px] font-semibold"
+            style={{ color }}
           >
             {String(day.seq).padStart(2, "0")}
           </span>
@@ -191,14 +192,14 @@ function DayCard({
             <p className="text-sm font-semibold leading-tight tracking-tight">
               {day.title || `Day ${day.seq}`}
             </p>
-            <p className="tnum mt-0.5 text-xs text-fg-faint">{fmtDate(day.date)}</p>
+            <p className="eyebrow mt-1">{fmtDate(day.date)}</p>
           </div>
         </div>
         <div className="text-right">
           {route && route.distanceM > 0 ? (
             <>
-              <p className="tnum text-xs font-semibold text-fg-muted">{fmtMiles(route.distanceM)}</p>
-              <p className="tnum text-[11px] text-fg-faint">{fmtDuration(route.durationS)}</p>
+              <p className="mono text-xs font-semibold text-fg-muted">{fmtMiles(route.distanceM)}</p>
+              <p className="mono mt-0.5 text-[10px] text-fg-faint">{fmtDuration(route.durationS)}</p>
             </>
           ) : (
             <span className="text-xs text-fg-faint">—</span>

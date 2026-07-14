@@ -14,22 +14,21 @@ const TABS = [
 export default function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 pb-safe">
-      <div className="glass-strong mx-auto flex max-w-md items-stretch justify-around rounded-t-2xl border-b-0 px-2">
+    <nav className="pointer-events-none fixed inset-x-0 bottom-[max(env(safe-area-inset-bottom),10px)] z-40 px-4">
+      <div className="glass-strong pointer-events-auto mx-auto flex max-w-md items-stretch justify-around rounded-2xl p-1.5">
         {TABS.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
-              className="pressable relative flex min-h-[56px] min-w-[56px] flex-1 flex-col items-center justify-center gap-1 py-2"
+              className={`pressable flex min-h-[50px] min-w-[56px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors duration-200 ${
+                active ? "bg-accent-soft" : ""
+              }`}
             >
-              {active && (
-                <span className="absolute top-0 h-0.5 w-8 rounded-full" style={{ background: "var(--accent-gradient)" }} />
-              )}
               <Icon active={active} />
               <span
-                className={`text-[10px] font-medium tracking-wide ${
+                className={`text-[9.5px] font-semibold tracking-wide ${
                   active ? "text-accent" : "text-fg-faint"
                 }`}
               >

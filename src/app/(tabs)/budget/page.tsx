@@ -92,8 +92,8 @@ export default function BudgetPage() {
         <div className="glass border-x-0 border-t-0 px-5 pb-3.5 pt-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="eyebrow">Budget</p>
-              <h1 className="mt-0.5 text-xl font-bold tracking-tight">The damage</h1>
+              <p className="eyebrow">Estimate → Actual → Forecast</p>
+              <h1 className="mt-0.5 text-xl font-bold tracking-tight">Budget</h1>
             </div>
             <CountdownPill />
           </div>
@@ -111,23 +111,33 @@ export default function BudgetPage() {
             }}
           />
           <p className="eyebrow">Projected trip total</p>
-          <p className="tnum mt-1.5 text-[40px] font-bold leading-none tracking-[-0.03em]">
+          <p className="text-gradient tnum mt-1.5 text-[42px] font-bold leading-none tracking-[-0.03em]">
             {fmtMoney(totals.projected)}
           </p>
-          <div className="tnum mt-3 flex gap-5 text-xs">
+          {/* spent-vs-projection meter */}
+          <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-fg/5">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.min(100, (totals.actual / Math.max(totals.projected, 1)) * 100)}%`,
+                background: "var(--accent-gradient)",
+              }}
+            />
+          </div>
+          <div className="stat-strip mt-4">
             <span>
-              <span className="block text-fg-faint">Spent</span>
-              <span className="mt-0.5 block font-semibold">{fmtMoney(totals.actual)}</span>
+              <span className="mono block text-[13px] font-semibold">{fmtMoney(totals.actual)}</span>
+              <span className="eyebrow mt-0.5 block">spent</span>
             </span>
             <span>
-              <span className="block text-fg-faint">Seed estimate</span>
-              <span className="mt-0.5 block font-semibold">{fmtMoney(totals.estimate)}</span>
+              <span className="mono block text-[13px] font-semibold">{fmtMoney(totals.estimate)}</span>
+              <span className="eyebrow mt-0.5 block">seed est</span>
             </span>
             <span>
-              <span className="block text-fg-faint">Forecast</span>
-              <span className="mt-0.5 block font-semibold text-accent">
-                {anyBlended ? "live-blended" : daysElapsed > 0 ? "refining" : "seeded"}
+              <span className="mono block text-[13px] font-semibold text-accent">
+                {anyBlended ? "blended" : daysElapsed > 0 ? "refining" : "seeded"}
               </span>
+              <span className="eyebrow mt-0.5 block">forecast</span>
             </span>
           </div>
         </section>

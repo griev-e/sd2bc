@@ -58,8 +58,10 @@ export default function PackingPage() {
         <div className="glass border-x-0 border-t-0 px-5 pb-3.5 pt-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="eyebrow">Packing</p>
-              <h1 className="mt-0.5 text-xl font-bold tracking-tight">The kit</h1>
+              <p className="eyebrow">
+                {done}/{packing.length} packed
+              </p>
+              <h1 className="mt-0.5 text-xl font-bold tracking-tight">Packing</h1>
             </div>
             <CountdownPill />
           </div>
@@ -73,8 +75,8 @@ export default function PackingPage() {
                 }}
               />
             </div>
-            <span className="tnum text-xs font-semibold text-fg-muted">
-              {done}/{packing.length}
+            <span className="mono text-xs font-semibold text-fg-muted">
+              {packing.length ? Math.round((done / packing.length) * 100) : 0}%
             </span>
           </div>
         </div>
