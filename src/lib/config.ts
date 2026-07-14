@@ -1,0 +1,18 @@
+// Supabase publishable credentials. The publishable key is safe to ship to
+// clients by design — all access is gated by Row Level Security. Env vars
+// take precedence so the project can be repointed without a code change.
+export const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://rfrzvyklvsozhngcgxis.supabase.co";
+
+export const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  "sb_publishable__Xv-ME9hUoGy68Ezv1q56g_93_1Tc7a";
+
+export const OSRM_URL = "https://router.project-osrm.org";
+export const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+export const NOMINATIM_URL = "https://nominatim.openstreetmap.org";
+
+export const MAP_STYLE_LIGHT = "https://tiles.openfreemap.org/styles/positron";
+export const MAP_STYLE_DARK = "https://tiles.openfreemap.org/styles/dark";
+
+export const TRIP_START = "2026-07-27";

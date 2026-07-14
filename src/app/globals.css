@@ -1,0 +1,383 @@
+@import "tailwindcss";
+
+/*
+  Coastline design system — "instrument panel over the Pacific".
+  Product-grade SaaS surface treatment: crisp 1px hairlines, layered glass,
+  one gradient accent (sea-glass teal → cyan), tabular numerals for data.
+*/
+:root {
+  --bg: #f7f7f8;
+  --bg-elevated: #ffffff;
+  --fg: #0b1215;
+  --fg-muted: rgba(11, 18, 21, 0.6);
+  --fg-faint: rgba(11, 18, 21, 0.38);
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-strong: rgba(255, 255, 255, 0.92);
+  --glass-border: rgba(11, 18, 21, 0.08);
+  --glass-shadow:
+    0 1px 2px rgba(11, 18, 21, 0.04),
+    0 8px 24px -8px rgba(11, 18, 21, 0.12);
+  --accent: #0d9488;
+  --accent-2: #0891b2;
+  --accent-strong: #0f766e;
+  --accent-soft: rgba(13, 148, 136, 0.1);
+  --accent-contrast: #ffffff;
+  --accent-gradient: linear-gradient(135deg, #0d9488, #0891b2);
+  --danger: #dc4b4b;
+  --hairline: rgba(11, 18, 21, 0.07);
+  --ring: rgba(13, 148, 136, 0.35);
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0c0e;
+  --bg-elevated: #14181c;
+  --fg: #f0f3f4;
+  --fg-muted: rgba(240, 243, 244, 0.62);
+  --fg-faint: rgba(240, 243, 244, 0.36);
+  --glass: rgba(18, 22, 26, 0.72);
+  --glass-strong: rgba(18, 22, 26, 0.92);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 12px 32px -8px rgba(0, 0, 0, 0.5);
+  --accent: #2dd4bf;
+  --accent-2: #22d3ee;
+  --accent-strong: #5eead4;
+  --accent-soft: rgba(45, 212, 191, 0.12);
+  --accent-contrast: #042f2a;
+  --accent-gradient: linear-gradient(135deg, #2dd4bf, #22d3ee);
+  --danger: #f47171;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --ring: rgba(45, 212, 191, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0a0c0e;
+    --bg-elevated: #14181c;
+    --fg: #f0f3f4;
+    --fg-muted: rgba(240, 243, 244, 0.62);
+    --fg-faint: rgba(240, 243, 244, 0.36);
+    --glass: rgba(18, 22, 26, 0.72);
+    --glass-strong: rgba(18, 22, 26, 0.92);
+    --glass-border: rgba(255, 255, 255, 0.09);
+    --glass-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.4),
+      0 12px 32px -8px rgba(0, 0, 0, 0.5);
+    --accent: #2dd4bf;
+    --accent-2: #22d3ee;
+    --accent-strong: #5eead4;
+    --accent-soft: rgba(45, 212, 191, 0.12);
+    --accent-contrast: #042f2a;
+    --accent-gradient: linear-gradient(135deg, #2dd4bf, #22d3ee);
+    --danger: #f47171;
+    --hairline: rgba(255, 255, 255, 0.08);
+    --ring: rgba(45, 212, 191, 0.4);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-danger: var(--danger);
+  --color-hairline: var(--hairline);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+  letter-spacing: -0.011em;
+}
+
+/* engineering-paper dot grid behind list pages; the map covers it on /map */
+body {
+  background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+:root {
+  --dot: rgba(11, 18, 21, 0.055);
+}
+:root[data-theme="dark"] {
+  --dot: rgba(255, 255, 255, 0.045);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --dot: rgba(255, 255, 255, 0.045);
+  }
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---- surface primitives ------------------------------------------------ */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-strong {
+  background: var(--glass-strong);
+  backdrop-filter: blur(28px) saturate(1.7);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.card {
+  background: var(--glass);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 1px 2px rgba(11, 18, 21, 0.05);
+  border-radius: 16px;
+}
+:root[data-theme="dark"] .card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .card {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.hairline-t {
+  border-top: 1px solid var(--hairline);
+}
+
+/* Small-caps mono section label — the product voice. */
+.eyebrow {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* header metric strip: value + unit pairs divided by hairlines */
+.stat-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+.stat-strip > * + * {
+  border-left: 1px solid var(--hairline);
+  padding-left: 14px;
+  margin-left: 14px;
+}
+
+/* Primary action — gradient with inner light. */
+.btn-primary {
+  background: var(--accent-gradient);
+  color: var(--accent-contrast);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 2px rgba(11, 18, 21, 0.2),
+    0 4px 14px -4px var(--ring);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--fg-muted);
+}
+
+.text-gradient {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- motion ----------------------------------------------------------- */
+.pressable {
+  transition: transform 150ms ease, opacity 150ms ease, box-shadow 150ms ease;
+}
+.pressable:active {
+  transform: scale(0.97);
+  opacity: 0.88;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  border-radius: 12px;
+  background: linear-gradient(
+    90deg,
+    var(--glass-border) 25%,
+    var(--accent-soft) 50%,
+    var(--glass-border) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease infinite;
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 250ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* ---- safe areas -------------------------------------------------------- */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* ---- map --------------------------------------------------------------- */
+.maplibregl-map {
+  font: inherit;
+}
+.maplibregl-ctrl-attrib {
+  background: var(--glass) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 10px 0 0 0;
+  font-size: 9px;
+  opacity: 0.75;
+}
+.maplibregl-ctrl-attrib a {
+  color: var(--fg-muted) !important;
+}
+
+/* stop marker (DOM marker) */
+.stop-marker {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.stop-marker.selected {
+  transform: scale(1.28);
+  z-index: 5;
+}
+.stop-marker.overnight::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid currentColor;
+}
+
+/* shaping (via) point */
+.via-marker {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 3.5px solid var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 1px 6px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+.via-marker:active {
+  cursor: grabbing;
+}
+
+/* hide scrollbars on chip rows but keep scroll */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+input[type="checkbox"].check-pill {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1.5px solid var(--fg-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 180ms ease, border-color 180ms ease;
+  flex-shrink: 0;
+}
+input[type="checkbox"].check-pill:checked {
+  background: var(--accent-gradient);
+  border-color: transparent;
+}
+input[type="checkbox"].check-pill:checked::after {
+  content: "";
+  width: 6px;
+  height: 10px;
+  border: solid var(--accent-contrast);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-1px);
+}
+
+/* field */
+.field {
+  height: 46px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--bg-elevated);
+  padding: 0 14px;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
