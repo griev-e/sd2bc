@@ -83,6 +83,7 @@ function Results({
   const [results, setResults] = useState<Suggestion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
+  const [attempt, setAttempt] = useState(0);
 
   const route = dayId ? routes[dayId] : undefined;
   const hasRoute = !!route && route.coordinates.length >= 2;
@@ -95,13 +96,13 @@ function Results({
       .catch(
         () =>
           !cancelled &&
-          setError("Couldn't reach OpenStreetMap — try again in a minute."),
+          setError("OpenStreetMap is being slow right now — give it another go."),
       );
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasRoute, category, dayId]);
+  }, [hasRoute, category, dayId, attempt]);
 
   if (!hasRoute) {
     return (
@@ -111,14 +112,33 @@ function Results({
     );
   }
   if (error) {
-    return <p className="py-8 text-center text-sm text-fg-muted">{error}</p>;
+    return (
+      <div className="py-6 text-center">
+        <p className="text-sm text-fg-muted">{error}</p>
+        <button
+          onClick={() => {
+            setError(null);
+            setResults(null);
+            setAttempt((a) => a + 1);
+          }}
+          className="btn-primary pressable mt-4 h-10 rounded-xl px-6 text-sm font-semibold"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
   if (results === null) {
     return (
-      <div className="flex gap-3 overflow-hidden">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="skeleton h-36 w-40 flex-shrink-0" />
-        ))}
+      <div>
+        <div className="flex gap-3 overflow-hidden">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skeleton h-36 w-40 flex-shrink-0" />
+          ))}
+        </div>
+        <p className="mt-3 text-center text-[11px] text-fg-faint">
+          Asking OpenStreetMap — usually a few seconds, sometimes ~20.
+        </p>
       </div>
     );
   }

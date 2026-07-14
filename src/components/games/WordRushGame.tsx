@@ -1,12 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconTimer } from "@/components/Icons";
-import { WORD_CARDS } from "@/lib/gameData";
+import { WORD_CARDS, type WordCard } from "@/lib/gameData";
 import { useTrip } from "@/lib/store";
 import { ScoreStrip, useGameEvents, usePlayers } from "./shared";
 
 const ROUND_SECONDS = 60;
+
+/** Fisher–Yates over the full 50-card deck — every round is a fresh order. */
+function shuffleDeck(): WordCard[] {
+  const a = [...WORD_CARDS];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 /**
  * Word rush (taboo): describe the word without the forbidden ones while
@@ -26,22 +36,21 @@ export default function WordRushGame() {
 
   const [phase, setPhase] = useState<"idle" | "play" | "done">("idle");
   const [round, setRound] = useState(0);
+  const [deck, setDeck] = useState<WordCard[]>(() => shuffleDeck());
   const [cardIdx, setCardIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(ROUND_SECONDS);
   const savedRef = useRef(false);
 
-  // fresh shuffle per round
-  const deck = useMemo(() => {
-    const a = [...WORD_CARDS];
-    let seed = round * 2654435761 + 97;
-    for (let i = a.length - 1; i > 0; i--) {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      const j = seed % (i + 1);
-      [a[i], a[j]] = [a[j], a[i]];
+  // next card — no repeats until all 50 have been seen, then reshuffle
+  function advance() {
+    if (cardIdx + 1 >= deck.length) {
+      setDeck(shuffleDeck());
+      setCardIdx(0);
+    } else {
+      setCardIdx(cardIdx + 1);
     }
-    return a;
-  }, [round]);
+  }
 
   useEffect(() => {
     if (phase !== "play") return;
@@ -67,6 +76,7 @@ export default function WordRushGame() {
 
   function start() {
     setRound((r) => r + 1);
+    setDeck(shuffleDeck());
     setCardIdx(0);
     setScore(0);
     setSecondsLeft(ROUND_SECONDS);
@@ -74,7 +84,7 @@ export default function WordRushGame() {
     setPhase("play");
   }
 
-  const card = deck[cardIdx % deck.length];
+  const card = deck[Math.min(cardIdx, deck.length - 1)];
 
   return (
     <div className="space-y-3.5">
@@ -116,7 +126,7 @@ export default function WordRushGame() {
 
           <div className="flex gap-2">
             <button
-              onClick={() => setCardIdx((i) => i + 1)}
+              onClick={advance}
               className="btn-ghost pressable h-14 flex-1 rounded-xl text-sm font-semibold"
             >
               Skip
@@ -124,7 +134,7 @@ export default function WordRushGame() {
             <button
               onClick={() => {
                 setScore((v) => v + 1);
-                setCardIdx((i) => i + 1);
+                advance();
               }}
               className="btn-primary pressable h-14 flex-[2] rounded-xl text-base font-semibold"
             >

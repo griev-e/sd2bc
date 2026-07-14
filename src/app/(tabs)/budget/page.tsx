@@ -71,7 +71,6 @@ export default function BudgetPage() {
     [seed],
   );
   const total = CATEGORIES.reduce((s, c) => s + estimates[c], 0);
-  const maxEstimate = Math.max(...CATEGORIES.map((c) => estimates[c]), 1);
   const totalMiles = Object.values(seed.milesByRegion).reduce((a, b) => a + b, 0);
 
   // estimated spend per category per day — powers the trend bars
@@ -201,13 +200,11 @@ export default function BudgetPage() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold">{CATEGORY_LABEL[c]}</span>
-                    <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-fg/5">
+                    {/* uniform full-width bar per row — consistent, easy to scan */}
+                    <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full">
                       <span
-                        className="block h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${(estimates[c] / maxEstimate) * 100}%`,
-                          background: color.fg,
-                        }}
+                        className="block h-full rounded-full"
+                        style={{ background: color.fg }}
                       />
                     </span>
                   </span>

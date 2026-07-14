@@ -10,7 +10,7 @@ import WordRushGame from "@/components/games/WordRushGame";
 import type { GameId } from "@/lib/types";
 
 const GAMES: { id: GameId; label: string; blurb: string }[] = [
-  { id: "plates", label: "Plates", blurb: "License-plate bingo, first tap wins" },
+  { id: "plates", label: "Plates", blurb: "License-plate bingo — collect them together" },
   { id: "roadside", label: "I Spy", blurb: "Roadside scavenger hunt" },
   { id: "fastfood", label: "Chains", blurb: "Count your chain's sightings" },
   { id: "cars", label: "$$$ Cars", blurb: "Priciest spot on record" },

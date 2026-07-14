@@ -39,6 +39,41 @@ export function setThemePref(pref: ThemePref) {
   for (const l of listeners) l();
 }
 
+/* ---- accent color ------------------------------------------------------ */
+
+export type AccentPref = "ocean" | "sunset" | "rose" | "orchid" | "moss";
+
+export const ACCENTS: { key: AccentPref; label: string; swatch: string }[] = [
+  { key: "ocean", label: "Sea glass", swatch: "linear-gradient(135deg,#0d9488,#0891b2)" },
+  { key: "sunset", label: "Sunset", swatch: "linear-gradient(135deg,#ea580c,#e11d48)" },
+  { key: "rose", label: "Rosé", swatch: "linear-gradient(135deg,#db2777,#f43f5e)" },
+  { key: "orchid", label: "Orchid", swatch: "linear-gradient(135deg,#7c3aed,#c026d3)" },
+  { key: "moss", label: "Moss", swatch: "linear-gradient(135deg,#059669,#65a30d)" },
+];
+
+const ACCENT_KEY = "coastline-accent";
+
+export function getAccentPref(): AccentPref {
+  if (typeof window === "undefined") return "ocean";
+  const v = localStorage.getItem(ACCENT_KEY);
+  return ACCENTS.some((a) => a.key === v) ? (v as AccentPref) : "ocean";
+}
+
+export function serverAccentPref(): AccentPref {
+  return "ocean";
+}
+
+export function setAccentPref(pref: AccentPref) {
+  if (pref === "ocean") {
+    delete document.documentElement.dataset.accent;
+    localStorage.removeItem(ACCENT_KEY);
+  } else {
+    document.documentElement.dataset.accent = pref;
+    localStorage.setItem(ACCENT_KEY, pref);
+  }
+  for (const l of listeners) l();
+}
+
 /** Is the app currently rendering dark, whatever the preference? */
 export function effectiveDark(): boolean {
   const t = document.documentElement.dataset.theme;

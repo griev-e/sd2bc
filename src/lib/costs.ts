@@ -7,28 +7,28 @@ import type { Region } from "./geo";
   the trip happens (3+ entries in a category → trust our own average).
 */
 
-/** Regular gas, USD per gallon (BC converted from CAD/L). */
+/** Regular gas, USD per gallon — AAA state averages, July 2026 (BC converted from ~C$1.80/L). */
 export const GAS_PRICE_USD_PER_GAL: Record<Region, number> = {
-  CA: 5.05,
-  OR: 4.35,
-  WA: 4.75,
-  BC: 4.6,
+  CA: 5.37,
+  OR: 4.56,
+  WA: 5.02,
+  BC: 4.95,
 };
 
-/** Mid-range room per night, USD. Big-city names get a bump. */
+/** Mid-range room per night, USD, peak-summer coastal corridor. Big-city names get a bump. */
 export const LODGING_PER_NIGHT: Record<Region, number> = {
-  CA: 185,
-  OR: 150,
-  WA: 175,
-  BC: 195,
+  CA: 195,
+  OR: 180,
+  WA: 195,
+  BC: 205,
 };
 
-export const BIG_CITY_BUMP = 45;
+export const BIG_CITY_BUMP = 50;
 export const BIG_CITY_PATTERN = /san francisco|seattle|vancouver|santa barbara/i;
 
-/** Per person per day, USD. */
-export const FOOD_PER_PERSON_DAY = 58;
-export const ACTIVITIES_PER_PERSON_DAY = 24;
+/** Per person per day, USD — casual breakfast/lunch + one sit-down dinner. */
+export const FOOD_PER_PERSON_DAY = 60;
+export const ACTIVITIES_PER_PERSON_DAY = 25;
 export const MISC_PER_DAY = 12;
 
 export const CATEGORIES: ExpenseCategory[] = [

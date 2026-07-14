@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Sheet from "./Sheet";
 import AttributionDot from "./Attribution";
 import { StopKindIcon } from "./CategoryIcon";
-import { IconLink } from "./Icons";
+import { IconLink, IconX } from "./Icons";
 import { KIND_COLOR } from "@/lib/colors";
 import { useTrip } from "@/lib/store";
 import type { Stop, StopKind } from "@/lib/types";
@@ -118,6 +118,72 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
             );
           })}
         </div>
+      </div>
+
+      {/* schedule — a time, optionally with a length of stay */}
+      <div>
+        <p className="eyebrow mb-2 px-0.5">Time</p>
+        <div className="flex items-center gap-2">
+          <input
+            type="time"
+            value={stop.start_time ?? ""}
+            onChange={(e) =>
+              void updateStop(stop.id, {
+                start_time: e.target.value || null,
+                // clearing the time clears the stay length too
+                ...(e.target.value ? {} : { duration_min: null }),
+              })
+            }
+            className="field flex-1"
+            aria-label="Scheduled time"
+          />
+          {stop.start_time && (
+            <button
+              onClick={() => void updateStop(stop.id, { start_time: null, duration_min: null })}
+              aria-label="Clear time"
+              className="btn-ghost pressable flex h-[46px] w-[46px] flex-shrink-0 items-center justify-center rounded-xl"
+            >
+              <IconX size={14} />
+            </button>
+          )}
+        </div>
+        {stop.start_time && (
+          <div className="no-scrollbar -mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1">
+            {(
+              [
+                [null, "Just a time"],
+                [30, "30m"],
+                [60, "1h"],
+                [90, "1.5h"],
+                [120, "2h"],
+                [180, "3h"],
+                [240, "4h"],
+              ] as [number | null, string][]
+            ).map(([mins, label]) => {
+              const active = (stop.duration_min ?? null) === mins;
+              return (
+                <button
+                  key={label}
+                  onClick={() => void updateStop(stop.id, { duration_min: mins })}
+                  className={`pressable flex-shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${
+                    active
+                      ? "bg-accent-soft text-accent ring-1 ring-accent"
+                      : "border border-hairline text-fg-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <p className="mt-1.5 px-0.5 text-[11px] leading-4 text-fg-faint">
+          {stop.start_time
+            ? stop.duration_min
+              ? "Arrive at the time, stay for the length picked."
+              : "A single point in time — good for departures or check-ins."
+            : "Optional — set one for departures, reservations, or check-ins."}
+        </p>
       </div>
 
       <label className="card flex min-h-[52px] items-center justify-between rounded-2xl px-4 py-3">

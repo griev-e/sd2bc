@@ -55,6 +55,20 @@ export function fmtClock(minutes: number): string {
   return `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
 }
 
+/** "2:30 PM" from a stored "14:30". */
+export function fmtTimeOfDay(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  return fmtClock(h * 60 + m);
+}
+
+/** "1h 30m" / "45m" for a planned length of stay. */
+export function fmtStay(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 /** Preferred short name for a traveler: display name, else username. */
 export function displayName(
   p: { display_name: string | null; username: string } | null | undefined,

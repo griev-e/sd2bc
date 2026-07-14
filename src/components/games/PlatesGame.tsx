@@ -1,20 +1,22 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { IconSearch } from "@/components/Icons";
 import { CA_PROVINCES, US_STATES } from "@/lib/gameData";
 import { useTrip } from "@/lib/store";
-import { ScoreStrip, useGameEvents, usePlayers } from "./shared";
+import { useGameEvents, usePlayers } from "./shared";
 
 /**
- * License-plate spotting: first phone to tap a state claims it in their
- * color. Tap one of your own claims again to release it (mis-taps happen
- * at 70 mph). The unique index in Postgres referees simultaneous grabs.
+ * License-plate spotting — cooperative. One shared collection: whoever sees
+ * a plate taps it and it counts for the team (the tile keeps the spotter's
+ * color for bragging rights). Tap any claimed tile again to release it.
  */
 export default function PlatesGame() {
   const events = useGameEvents("plates");
   const { me, partner } = usePlayers();
   const addGameEvent = useTrip((s) => s.addGameEvent);
   const deleteGameEvent = useTrip((s) => s.deleteGameEvent);
+  const [query, setQuery] = useState("");
 
   const claims = useMemo(() => {
     const m = new Map<string, { id: string; by: string | null }>();
@@ -24,18 +26,12 @@ export default function PlatesGame() {
     return m;
   }, [events]);
 
-  const mine = [...claims.values()].filter((c) => c.by === me?.id).length;
-  const theirs = [...claims.values()].filter((c) => partner && c.by === partner.id).length;
   const total = US_STATES.length + CA_PROVINCES.length;
 
   function tap(code: string) {
     const claim = claims.get(code);
-    if (!claim) {
-      void addGameEvent({ game: "plates", kind: "claim", key: code });
-    } else if (claim.by === me?.id) {
-      void deleteGameEvent(claim.id);
-    }
-    // theirs — hands off
+    if (!claim) void addGameEvent({ game: "plates", kind: "claim", key: code });
+    else void deleteGameEvent(claim.id); // cooperative — either of us can undo
   }
 
   function colorFor(by: string | null): string | undefined {
@@ -44,20 +40,71 @@ export default function PlatesGame() {
     return "var(--fg-faint)";
   }
 
+  // search matches "CA", "cal", or "california"
+  const q = query.trim().toLowerCase();
+  const match = (item: { code: string; name: string }) =>
+    q === "" ||
+    item.code.toLowerCase().startsWith(q) ||
+    item.name.toLowerCase().includes(q);
+  const usFiltered = US_STATES.filter(match);
+  const caFiltered = CA_PROVINCES.filter(match);
+
   return (
     <div className="space-y-3.5">
-      <ScoreStrip me={me} partner={partner} mine={mine} theirs={theirs} />
-      <p className="px-1 text-center text-[11px] text-fg-faint">
-        {claims.size}/{total} spotted · tap a plate when you see it — first phone wins it
-      </p>
+      {/* team progress */}
       <section className="card p-4">
-        <p className="eyebrow mb-2.5 px-1">United States</p>
-        <PlateGrid items={US_STATES} claims={claims} onTap={tap} colorFor={colorFor} />
+        <div className="flex items-baseline justify-between">
+          <p className="tnum text-2xl font-bold leading-none">
+            {claims.size}
+            <span className="text-sm font-semibold text-fg-faint"> / {total}</span>
+          </p>
+          <p className="eyebrow">spotted together</p>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-fg/5">
+          <div
+            className="h-full rounded-full transition-[width] duration-500"
+            style={{
+              width: `${(claims.size / total) * 100}%`,
+              background: "var(--accent-gradient)",
+            }}
+          />
+        </div>
       </section>
-      <section className="card p-4">
-        <p className="eyebrow mb-2.5 px-1">Canada</p>
-        <PlateGrid items={CA_PROVINCES} claims={claims} onTap={tap} colorFor={colorFor} />
-      </section>
+
+      {/* find a state fast at 70 mph */}
+      <div className="relative">
+        <IconSearch
+          size={15}
+          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-fg-faint"
+        />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search — California or CA"
+          autoCapitalize="none"
+          autoCorrect="off"
+          className="field pl-10"
+          aria-label="Search states and provinces"
+        />
+      </div>
+
+      {usFiltered.length > 0 && (
+        <section className="card p-4">
+          <p className="eyebrow mb-2.5 px-1">United States</p>
+          <PlateGrid items={usFiltered} claims={claims} onTap={tap} colorFor={colorFor} />
+        </section>
+      )}
+      {caFiltered.length > 0 && (
+        <section className="card p-4">
+          <p className="eyebrow mb-2.5 px-1">Canada</p>
+          <PlateGrid items={caFiltered} claims={claims} onTap={tap} colorFor={colorFor} />
+        </section>
+      )}
+      {usFiltered.length === 0 && caFiltered.length === 0 && (
+        <p className="py-6 text-center text-sm text-fg-muted">
+          Nothing matches &ldquo;{query}&rdquo;.
+        </p>
+      )}
     </div>
   );
 }

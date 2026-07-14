@@ -16,7 +16,7 @@ export default function BottomNav() {
   const pathname = usePathname();
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-[max(env(safe-area-inset-bottom),10px)] z-40 px-4">
-      <div className="glass-strong pointer-events-auto mx-auto flex max-w-md items-stretch justify-around rounded-2xl p-1.5">
+      <div className="nav-glass pointer-events-auto mx-auto flex max-w-md items-stretch justify-around rounded-2xl p-1.5">
         {TABS.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href);
           return (
