@@ -25,11 +25,12 @@ import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
 import { IconGrip, IconMoon, IconPlus, IconSparkle, IconTrash } from "@/components/Icons";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
+import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
 import { type StopSchedule, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
-import { useWeather, weatherKind } from "@/lib/weather";
+import { type DayWeather, useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
 
 export default function DaysPage() {
@@ -60,8 +61,7 @@ export default function DaysPage() {
         <div className="glass border-x-0 border-t-0 px-5 pb-3.5 pt-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="eyebrow">SAN → YVR → SAN</p>
-              <h1 className="display mt-0.5 text-[22px] tracking-tight">Itinerary</h1>
+              <h1 className="display text-[22px] tracking-tight">Itinerary</h1>
             </div>
             <CountdownPill />
           </div>
@@ -152,6 +152,18 @@ function DayCard({
   // stop's planned stay — shared with the stop editor.
   const schedule = useSchedule();
 
+  // One weather badge per geographic cluster of stops — shown on the cluster's
+  // representative (first) stop only.
+  const byCluster = useWeather((s) => s.byCluster);
+  const clusterWeather = useMemo(() => {
+    const map = new Map<string, DayWeather>();
+    for (const c of clusterStops(dayStops)) {
+      const w = byCluster[clusterKey(day.id, c.repStopId)];
+      if (w) map.set(c.repStopId, w);
+    }
+    return map;
+  }, [dayStops, byCluster, day.id]);
+
   const segByFrom = useMemo(() => {
     const m = new Map<string, { distanceM: number; durationS: number }>();
     for (const seg of route?.segments ?? []) m.set(seg.fromStopId, seg);
@@ -162,6 +174,14 @@ function DayCard({
     if (!route || dayStops.length === 0) return null;
     return route.segments.find((s) => s.toStopId === dayStops[0].id) ?? null;
   }, [route, dayStops]);
+
+  // When the day's first stop has an ETA, back out when to leave last night's
+  // stay to make it — the departure we never show as its own stop.
+  const firstSched = dayStops[0] ? schedule.get(dayStops[0].id) : undefined;
+  const leaveMin =
+    morningSeg && firstSched
+      ? ((firstSched.arrivalMin - morningSeg.durationS / 60) % 1440 + 1440) % 1440
+      : undefined;
 
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
@@ -222,6 +242,15 @@ function DayCard({
 
       {morningSeg && (
         <p className="tnum mt-2.5 pl-[26px] text-[11px] text-fg-faint">
+          {leaveMin !== undefined && (
+            <span
+              className={firstSched?.anchored ? "font-semibold text-accent" : "text-fg-muted"}
+            >
+              {firstSched?.anchored ? "Leave by " : "Leave ~"}
+              {fmtClock(leaveMin)}
+              {" · "}
+            </span>
+          )}
           {fmtMiles(morningSeg.distanceM)} · {fmtDuration(morningSeg.durationS)}
           {" from last night's stay"}
         </p>
@@ -242,6 +271,7 @@ function DayCard({
                 stop={stop}
                 isLast={si === dayStops.length - 1}
                 sched={schedule.get(stop.id)}
+                weather={clusterWeather.get(stop.id)}
                 seg={si < dayStops.length - 1 ? segByFrom.get(stop.id) : undefined}
                 onTap={() => {
                   setSelectedStop(stop.id);
@@ -292,12 +322,14 @@ function SortableStop({
   stop,
   isLast,
   sched,
+  weather,
   seg,
   onTap,
 }: {
   stop: Stop;
   isLast: boolean;
   sched?: StopSchedule;
+  weather?: DayWeather;
   seg?: { distanceM: number; durationS: number };
   onTap: () => void;
 }) {
@@ -354,6 +386,12 @@ function SortableStop({
             {stop.notes && " · note"}
           </p>
         </div>
+        {weather && (
+          <span className="flex flex-shrink-0 items-center gap-1 text-fg-muted">
+            <WeatherIcon kind={weatherKind(weather.code)} size={14} strokeWidth={2} />
+            <span className="tnum text-[11px] font-medium">{weather.tMaxF}°</span>
+          </span>
+        )}
         <AttributionDot userId={stop.updated_by ?? stop.created_by} size={14} />
         <button
           {...attributes}

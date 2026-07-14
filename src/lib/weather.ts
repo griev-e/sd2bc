@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { Day, Stop } from "./types";
+import { clusterKey, clusterStops } from "./clusters";
 import { localDateISO } from "./format";
 
 /**
@@ -52,7 +53,10 @@ export const WEATHER_LABEL: Record<WeatherKind, string> = {
 };
 
 interface WeatherState {
+  /** Forecast per trip day (representative point) — powers the day header. */
   byDay: Record<string, DayWeather | undefined>;
+  /** Forecast per stop cluster, keyed by `${dayId}:${repStopId}`. */
+  byCluster: Record<string, DayWeather | undefined>;
   sync: (days: Day[], stops: Stop[]) => void;
 }
 
@@ -62,29 +66,53 @@ let inflight = false;
 
 export const useWeather = create<WeatherState>((set) => ({
   byDay: {},
+  byCluster: {},
 
   sync: (days, stops) => {
     const today = localDateISO(new Date());
     const horizon = localDateISO(new Date(Date.now() + 15 * 86400000));
 
-    // representative point per day: overnight stop, else last stop
-    const targets: { dayId: string; date: string; lat: number; lng: number }[] = [];
+    // One point per stop cluster; the day header reuses the cluster holding the
+    // day's representative stop (overnight, else last).
+    const targets: {
+      clusterKey: string;
+      dayId: string;
+      date: string;
+      lat: number;
+      lng: number;
+    }[] = [];
+    const dayRepKey: Record<string, string> = {};
+
     for (const day of days) {
       if (day.date < today || day.date > horizon) continue;
       const dayStops = stops
         .filter((s) => s.day_id === day.id)
         .sort((a, b) => a.seq - b.seq);
+      if (dayStops.length === 0) continue;
+
+      const clusters = clusterStops(dayStops);
+      for (const c of clusters) {
+        targets.push({
+          clusterKey: clusterKey(day.id, c.repStopId),
+          dayId: day.id,
+          date: day.date,
+          lat: c.lat,
+          lng: c.lng,
+        });
+      }
+
       const rep = dayStops.find((s) => s.is_overnight) ?? dayStops[dayStops.length - 1];
-      if (!rep) continue;
-      targets.push({ dayId: day.id, date: day.date, lat: rep.lat, lng: rep.lng });
+      const repCluster = clusters.find((c) => c.stopIds.includes(rep.id));
+      if (repCluster) dayRepKey[day.id] = clusterKey(day.id, repCluster.repStopId);
     }
+
     if (targets.length === 0) {
-      set({ byDay: {} });
+      set({ byDay: {}, byCluster: {} });
       return;
     }
 
     const key = targets
-      .map((t) => `${t.dayId}:${t.date}:${t.lat.toFixed(2)},${t.lng.toFixed(2)}`)
+      .map((t) => `${t.clusterKey}:${t.date}:${t.lat.toFixed(2)},${t.lng.toFixed(2)}`)
       .join("|");
     if (inflight || (key === lastKey && Date.now() - lastFetched < 30 * 60000)) return;
     inflight = true;
@@ -102,7 +130,7 @@ export const useWeather = create<WeatherState>((set) => ({
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((json) => {
         const results = Array.isArray(json) ? json : [json];
-        const byDay: Record<string, DayWeather> = {};
+        const byCluster: Record<string, DayWeather> = {};
         targets.forEach((t, i) => {
           const daily = results[i]?.daily;
           if (!daily?.time) return;
@@ -112,11 +140,16 @@ export const useWeather = create<WeatherState>((set) => ({
           const tMaxF = daily.temperature_2m_max?.[di];
           const tMinF = daily.temperature_2m_min?.[di];
           if (code == null || tMaxF == null) return;
-          byDay[t.dayId] = { code, tMaxF: Math.round(tMaxF), tMinF: Math.round(tMinF) };
+          byCluster[t.clusterKey] = { code, tMaxF: Math.round(tMaxF), tMinF: Math.round(tMinF) };
         });
+        const byDay: Record<string, DayWeather> = {};
+        for (const [dayId, repKey] of Object.entries(dayRepKey)) {
+          const w = byCluster[repKey];
+          if (w) byDay[dayId] = w;
+        }
         lastKey = key;
         lastFetched = Date.now();
-        set({ byDay });
+        set({ byDay, byCluster });
       })
       .catch(() => {
         // quiet — weather is a garnish, never an error state

@@ -31,12 +31,13 @@ export const FOOD_PER_PERSON_DAY = 60;
 export const ACTIVITIES_PER_PERSON_DAY = 25;
 export const MISC_PER_DAY = 12;
 
+// "misc" is intentionally excluded from the budget breakdown / trip total —
+// the ExpenseCategory type still allows it so ad-hoc expenses can be logged.
 export const CATEGORIES: ExpenseCategory[] = [
   "gas",
   "lodging",
   "food",
   "activities",
-  "misc",
 ];
 
 export const CATEGORY_LABEL: Record<ExpenseCategory, string> = {

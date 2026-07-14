@@ -11,16 +11,15 @@ import { DAY_START_MIN, minutesToHHMM, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
 import type { Stop, StopKind } from "@/lib/types";
 
-/** Planned lengths of stay offered in the editor; null = a pass-through. */
-const STAY_OPTIONS: [number | null, string][] = [
+/** Preset lengths of stay offered in the editor; null = a pass-through. */
+const STAY_PRESETS: [number | null, string][] = [
   [null, "None"],
   [30, "30m"],
   [60, "1h"],
   [90, "1.5h"],
   [120, "2h"],
-  [180, "3h"],
-  [240, "4h"],
 ];
+const PRESET_MINS = STAY_PRESETS.map(([m]) => m);
 
 export const KIND_META: { key: StopKind; label: string }[] = [
   { key: "stop", label: "Stop" },
@@ -150,33 +149,7 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
 
       {/* Planned stay — pushes the next stop's ETA, independent of any pinned
           time. The origin has no stay (you just leave). */}
-      {!isOrigin && (
-        <div>
-          <p className="eyebrow mb-2 px-0.5">Time at this stop</p>
-          <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
-            {STAY_OPTIONS.map(([mins, label]) => {
-              const active = (stop.duration_min ?? null) === mins;
-              return (
-                <button
-                  key={label}
-                  onClick={() => void updateStop(stop.id, { duration_min: mins })}
-                  className={`pressable flex-shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${
-                    active
-                      ? "bg-accent-soft text-accent ring-1 ring-accent"
-                      : "border border-hairline text-fg-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-1.5 px-0.5 text-[11px] leading-4 text-fg-faint">
-            How long you&rsquo;ll stay — the next stop&rsquo;s ETA starts once you
-            leave.
-          </p>
-        </div>
-      )}
+      {!isOrigin && <StaySection stop={stop} updateStop={updateStop} />}
 
       {/* Optional anchor — pins a time and re-seeds the ETA chain from here.
           Prefills from the live estimate so you adjust rather than override. */}
@@ -329,6 +302,101 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
       >
         {confirmDelete ? "Tap again to confirm" : "Remove stop"}
       </button>
+    </div>
+  );
+}
+
+/**
+ * How long we linger at a stop — feeds the next stop's ETA. Presets cover the
+ * common cases; "Custom" opens an hours/minutes entry for anything else.
+ */
+function StaySection({
+  stop,
+  updateStop,
+}: {
+  stop: Stop;
+  updateStop: (id: string, patch: Partial<Stop>) => Promise<void>;
+}) {
+  const isCustomValue =
+    stop.duration_min != null && !PRESET_MINS.includes(stop.duration_min);
+  const [customOpen, setCustomOpen] = useState(isCustomValue);
+  const [h, setH] = useState(
+    isCustomValue ? String(Math.floor(stop.duration_min! / 60)) : "",
+  );
+  const [m, setM] = useState(isCustomValue ? String(stop.duration_min! % 60) : "");
+
+  function commit(hv: string, mv: string) {
+    const total = (parseInt(hv || "0", 10) || 0) * 60 + (parseInt(mv || "0", 10) || 0);
+    void updateStop(stop.id, { duration_min: total > 0 ? total : null });
+  }
+
+  return (
+    <div>
+      <p className="eyebrow mb-2 px-0.5">Time at this stop</p>
+      <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
+        {STAY_PRESETS.map(([mins, label]) => {
+          const active = !customOpen && (stop.duration_min ?? null) === mins;
+          return (
+            <button
+              key={label}
+              onClick={() => {
+                setCustomOpen(false);
+                void updateStop(stop.id, { duration_min: mins });
+              }}
+              className={`pressable flex-shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${
+                active
+                  ? "bg-accent-soft text-accent ring-1 ring-accent"
+                  : "border border-hairline text-fg-muted"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => setCustomOpen(true)}
+          className={`pressable flex-shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${
+            customOpen
+              ? "bg-accent-soft text-accent ring-1 ring-accent"
+              : "border border-hairline text-fg-muted"
+          }`}
+        >
+          Custom
+        </button>
+      </div>
+      {customOpen && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            value={h}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9]/g, "");
+              setH(v);
+              commit(v, m);
+            }}
+            inputMode="numeric"
+            placeholder="0"
+            aria-label="Hours"
+            className="field w-16 text-center"
+          />
+          <span className="text-xs text-fg-muted">hr</span>
+          <input
+            value={m}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9]/g, "");
+              setM(v);
+              commit(h, v);
+            }}
+            inputMode="numeric"
+            placeholder="0"
+            aria-label="Minutes"
+            className="field w-16 text-center"
+          />
+          <span className="text-xs text-fg-muted">min</span>
+        </div>
+      )}
+      <p className="mt-1.5 px-0.5 text-[11px] leading-4 text-fg-faint">
+        How long you&rsquo;ll stay — the next stop&rsquo;s ETA starts once you leave.
+      </p>
     </div>
   );
 }
