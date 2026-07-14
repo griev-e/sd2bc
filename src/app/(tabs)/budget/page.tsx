@@ -7,14 +7,13 @@ import { IconChevronDown } from "@/components/Icons";
 import { EXPENSE_COLOR } from "@/lib/colors";
 import {
   ACTIVITIES_PER_PERSON_DAY,
-  BIG_CITY_BUMP,
   BIG_CITY_PATTERN,
   CATEGORY_LABEL,
   CATEGORIES,
   FOOD_PER_PERSON_DAY,
   GAS_PRICE_USD_PER_GAL,
-  LODGING_PER_NIGHT,
   MISC_PER_DAY,
+  nightCost,
   seedEstimate,
   type SeedInputs,
 } from "@/lib/costs";
@@ -48,7 +47,12 @@ export default function BudgetPage() {
     }
     const nights = stops
       .filter((s) => s.is_overnight)
-      .map((s) => ({ region: regionOf(s.lat), bigCity: BIG_CITY_PATTERN.test(s.name) }));
+      .map((s) => ({
+        region: regionOf(s.lat),
+        bigCity: BIG_CITY_PATTERN.test(s.name),
+        free: s.lodging_free,
+        cost: s.lodging_cost,
+      }));
     return {
       milesByRegion,
       mpg,
@@ -89,8 +93,12 @@ export default function BudgetPage() {
         (s) => s.day_id === day.id && s.is_overnight,
       );
       const lodging = overnight
-        ? LODGING_PER_NIGHT[regionOf(overnight.lat)] +
-          (BIG_CITY_PATTERN.test(overnight.name) ? BIG_CITY_BUMP : 0)
+        ? nightCost({
+            region: regionOf(overnight.lat),
+            bigCity: BIG_CITY_PATTERN.test(overnight.name),
+            free: overnight.lodging_free,
+            cost: overnight.lodging_cost,
+          })
         : 0;
       byCat.gas.push(gas);
       byCat.lodging.push(lodging);
@@ -106,7 +114,9 @@ export default function BudgetPage() {
     const gallons = totalMiles / Math.max(1, mpg);
     const avgGal = gallons > 0 ? estimates.gas / gallons : 0;
     const nights = seed.nights.length;
-    const avgNight = nights > 0 ? estimates.lodging / nights : 0;
+    const freeNights = seed.nights.filter((n) => n.free).length;
+    const paidNights = nights - freeNights;
+    const avgNight = paidNights > 0 ? estimates.lodging / paidNights : 0;
     const nDays = orderedDays.length || 1;
     return {
       gas:
@@ -115,13 +125,15 @@ export default function BudgetPage() {
           : "No route yet — add stops and this fills in from real miles",
       lodging:
         nights > 0
-          ? `${nights} night${nights === 1 ? "" : "s"} · avg ${fmtMoney(avgNight)}/night`
+          ? `${nights} night${nights === 1 ? "" : "s"}${
+              freeNights ? ` · ${freeNights} free` : ""
+            }${paidNights > 0 ? ` · avg ${fmtMoney(avgNight)}/paid night` : ""}`
           : "No overnights marked yet — flag stops as overnight stays",
       food: `${fmtMoney(FOOD_PER_PERSON_DAY)}/person/day × ${travelers} × ${nDays} days`,
       activities: `${fmtMoney(ACTIVITIES_PER_PERSON_DAY)}/person/day × ${travelers} × ${nDays} days`,
       misc: `${fmtMoney(MISC_PER_DAY)}/day × ${nDays} days`,
     };
-  }, [totalMiles, mpg, estimates, seed.nights.length, orderedDays.length, travelers]);
+  }, [totalMiles, mpg, estimates, seed.nights, orderedDays.length, travelers]);
 
   return (
     <div className="min-h-dvh pb-32">
