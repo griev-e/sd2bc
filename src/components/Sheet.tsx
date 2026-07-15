@@ -13,6 +13,34 @@ interface SheetProps {
   maxHeight?: string;
 }
 
+// While any sheet is open the page behind must not scroll. Without this,
+// iOS tries to scroll the *document* to reveal a focused input inside the
+// fixed sheet — it can't, so it scrolls the background page to the bottom
+// and leaves it there after the sheet closes. Counter-based so overlapping
+// sheets (one closing while another opens) don't unlock early.
+let sheetLockCount = 0;
+let savedScrollY = 0;
+function lockBodyScroll() {
+  if (++sheetLockCount > 1) return;
+  savedScrollY = window.scrollY;
+  const b = document.body.style;
+  b.position = "fixed";
+  b.top = `-${savedScrollY}px`;
+  b.left = "0";
+  b.right = "0";
+  b.width = "100%";
+}
+function unlockBodyScroll() {
+  if (--sheetLockCount > 0) return;
+  const b = document.body.style;
+  b.position = "";
+  b.top = "";
+  b.left = "";
+  b.right = "";
+  b.width = "";
+  window.scrollTo(0, savedScrollY);
+}
+
 /** iOS-style spring bottom sheet rendered above the tab bar. */
 export default function Sheet({ open, onClose, title, children, maxHeight = "82dvh" }: SheetProps) {
   useEffect(() => {
@@ -21,6 +49,12 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    lockBodyScroll();
+    return unlockBodyScroll;
+  }, [open]);
 
   if (typeof document === "undefined") return null;
 
