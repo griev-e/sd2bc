@@ -10,6 +10,13 @@ export const SUPABASE_ANON_KEY =
 
 export const OSRM_URL = "https://router.project-osrm.org";
 export const OVERPASS_URL = "/api/overpass";
+/**
+ * QLever's full-planet OSM SPARQL endpoint. Its spatial index answers the
+ * "POIs near a route corridor" question in seconds, where the same query
+ * routinely blows past public Overpass instances' 30s timeout. CORS is open,
+ * so the browser can query it directly.
+ */
+export const QLEVER_OSM_URL = "https://qlever.dev/api/osm-planet";
 
 /** Free Esri World Imagery raster style for the satellite map mode. */
 export const MAP_STYLE_SATELLITE = {
