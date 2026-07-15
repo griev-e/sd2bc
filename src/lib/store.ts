@@ -563,6 +563,7 @@ export const useTrip = create<TripState>((set, get) => {
         kind: stop.kind ?? "stop",
         is_overnight: false,
         notes: "",
+        address: null,
         lodging_url: null,
         lodging_free: false,
         lodging_cost: null,

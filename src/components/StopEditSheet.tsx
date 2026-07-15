@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Sheet from "./Sheet";
 import AttributionDot from "./Attribution";
 import { StopKindIcon } from "./CategoryIcon";
-import { IconLink, IconX } from "./Icons";
+import { IconLink, IconPin, IconX } from "./Icons";
 import { KIND_COLOR } from "@/lib/colors";
 import { fmtClock } from "@/lib/format";
 import { DAY_START_MIN, minutesToHHMM, useSchedule } from "@/lib/schedule";
@@ -73,6 +73,7 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
   const anchorSeed = sched?.arrivalMin ?? DAY_START_MIN;
 
   const [name, setName] = useState(stop?.name ?? "");
+  const [address, setAddress] = useState(stop?.address ?? "");
   const [notes, setNotes] = useState(stop?.notes ?? "");
   const [lodgingUrl, setLodgingUrl] = useState(stop?.lodging_url ?? "");
   const [lodgingCost, setLodgingCost] = useState(
@@ -85,6 +86,9 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
     const patch: Partial<Stop> = {};
     if (name.trim() && name !== stop.name) patch.name = name.trim();
     if (notes !== stop.notes) patch.notes = notes;
+
+    const addr = address.trim();
+    if (addr !== (stop.address ?? "")) patch.address = addr || null;
 
     const url = lodgingUrl.trim();
     if (url !== (stop.lodging_url ?? "")) patch.lodging_url = url || null;
@@ -144,6 +148,32 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
               </button>
             );
           })}
+        </div>
+      </div>
+
+      <div>
+        <p className="eyebrow mb-2 px-0.5">Address</p>
+        <div className="flex items-center gap-2">
+          <input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            onBlur={commitText}
+            placeholder="Street address or place"
+            autoCapitalize="words"
+            autoCorrect="off"
+            className="field flex-1"
+          />
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+              address.trim() || `${stop.lat},${stop.lng}`,
+            )}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open in maps"
+            className="btn-ghost pressable flex h-[46px] w-[46px] flex-shrink-0 items-center justify-center rounded-xl text-accent"
+          >
+            <IconPin size={17} />
+          </a>
         </div>
       </div>
 
