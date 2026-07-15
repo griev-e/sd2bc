@@ -351,7 +351,14 @@ body {
 
 /* stop marker (DOM marker) */
 .stop-marker {
-  position: relative;
+  /* MapView overwrites this element's className after the Marker is created,
+     which drops MapLibre's own `maplibregl-marker` class (and the
+     `position: absolute` it carries). Without absolute positioning the marker
+     falls into normal flow and stacks vertically instead of tracking its
+     coordinate via MapLibre's transform, so pin the essentials here. */
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 28px;
   height: 28px;
   border-radius: 10px;
