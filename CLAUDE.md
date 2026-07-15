@@ -39,12 +39,15 @@ npm install
 npm run dev      # next dev — local development
 npm run build    # next build — production build (run before pushing UI changes)
 npm run lint     # eslint (next/core-web-vitals + next/typescript)
+npm test         # vitest — unit tests for the lib domain layer
 ```
 
-There is **no test suite** and no CI workflow in the repo. Verify changes by
-running `npm run lint` and `npm run build`, and by exercising the affected flow
-in `npm run dev`. `npm run build` is the real typecheck gate (`tsc --noEmit`
-runs as part of it) since the project has no standalone `typecheck` script.
+Unit tests (Vitest) cover the pure domain layer in `src/lib/*.test.ts` — run
+`npm test`. There is no CI workflow in the repo, so verify changes by running
+`npm run lint`, `npm test`, and `npm run build`, and by exercising the affected
+flow in `npm run dev`. `npm run build` is the real typecheck gate (`tsc
+--noEmit` runs as part of it) since the project has no standalone `typecheck`
+script.
 
 ## Layout
 
@@ -71,7 +74,7 @@ src/
 |------|----------------|
 | `store.ts` | Zustand store: all shared entities, optimistic mutations, Realtime channel, route computation. **Start here.** |
 | `types.ts` | Every DB row + computed type. The schema-of-record for the client. |
-| `config.ts` | All external endpoints + Supabase credentials + `TRIP_START`. |
+| `config.ts` | All external endpoints + Supabase credentials. |
 | `supabase.ts` | Browser Supabase singleton; `usernameToEmail()`. |
 | `osrm.ts` | `fetchRoute()` with memory → Supabase `route_cache` → network. |
 | `overpass.ts` | POI suggestions along a route corridor (Overpass/QLever, cached). |
@@ -93,18 +96,27 @@ Entities: `profiles`, `trip`, `days`, `stops`, `viaPoints`, `packing`,
 
 Conventions every mutation follows — **match these when adding one**:
 
-- **Optimistic writes.** Update local state first with a client-generated
-  `crypto.randomUUID()` id, then persist to Supabase. **On error, roll back**
-  the optimistic change (see `addStop`, `addViaPoint`, `addGameEvent`). Realtime
-  will reconcile the authoritative row.
+- **Optimistic writes.** Update local state first (inserts use a
+  client-generated `crypto.randomUUID()` id), then persist to Supabase. **On
+  error, roll back** the optimistic change — inserts remove the row, updates
+  and deletes restore the captured previous row. Realtime will reconcile the
+  authoritative row.
 - **Realtime is the reconciler.** One channel (`coastline-sync`) subscribes to
   `postgres_changes` on every shared table and funnels through `applyChange()`,
   which upserts by `id`. Any table you sync must be added to the `tables` list
   **and** to the Realtime publication in Supabase. Conflict policy is
   **last-write-wins**.
   - Realtime enforces RLS with the subscriber's JWT — the store calls
-    `realtime.setAuth(access_token)` before subscribing so events aren't
-    silently filtered. Preserve that if you touch `init()`.
+    `realtime.setAuth(access_token)` before subscribing (and re-attaches it on
+    `TOKEN_REFRESHED`) so events aren't silently filtered. Preserve that if you
+    touch `init()`.
+  - Missed events are never replayed, so the store does a full `refetchAll()`
+    after any channel drop and when the app returns to the foreground.
+- **Offline resilience.** The last good load is persisted to localStorage
+  (`coastline-snapshot-v1`) and hydrated when `init()` can't reach Supabase;
+  a service worker (`public/sw.js`) keeps the app shell openable offline. A
+  failed load with no snapshot sets `loadError`, which the tabs layout renders
+  as a retry screen.
 - **`seq` ordering.** Ordered lists (stops within a day, days, packing within a
   category) use an integer `seq`. New `seq` is `max(existing) + 1`, **never
   `count + 1`** — deletions leave gaps and count+1 would collide. Reordering
@@ -113,10 +125,13 @@ Conventions every mutation follows — **match these when adding one**:
 - **Via (shaping) points** are route-only: they bend the OSRM line but never
   appear in the itinerary and are never real stops. Deleting a stop cascades to
   its via points locally and in the DB.
-- **Route computation** is debounced (`scheduleRoutes`, 500ms) and re-runs
-  whenever days/stops/vias change. It's superseded-run-safe via a `routeRun`
-  counter — a newer edit invalidates an in-flight batch. Days route concurrently
-  with a worker pool capped at 6 to be polite to the public OSRM server.
+- **Route computation** is debounced (`scheduleRoutes`, 500ms) and re-runs only
+  when route *geometry* changed — `routeGeometryChanged()` compares incoming
+  Realtime rows against local state on the fields that feed `dayRoutePoints()`,
+  which also swallows the echo of our own writes. Geometry mutations schedule
+  the recompute locally. It's superseded-run-safe via a `routeRun` counter — a
+  newer edit invalidates an in-flight batch. Days route concurrently with a
+  worker pool capped at 6 to be polite to the public OSRM server.
 
 ## Free-service etiquette (do not regress this)
 
@@ -129,7 +144,7 @@ The whole app is designed to never hammer a free public endpoint:
   browser requests without a descriptive `User-Agent`. The proxy *hedges* across
   independent mirrors (staggered start, first good answer wins, losers aborted)
   and treats an HTTP-200 `remark`/empty-elements response as a failure. Results
-  cached ~7 days in `poi_cache`.
+  cached ~2 days in `poi_cache` (rows are purged server-side by pg_cron).
 - **Nominatim** search is debounced and only fires from explicit user input.
 - **Open-Meteo** forecasts are cached ~30 min and requested once per stop
   cluster, not per stop.
@@ -188,10 +203,9 @@ and runs with **no `.env`**. Env vars override when present:
 
 The budget tab is a **live forecast from the seed model** in `costs.ts` — 2026
 regional gas/lodging/food averages sharpened by real route miles (per-region,
-by latitude) and actual overnight stays. `misc` is deliberately excluded from
-the trip total. The README describes blending in logged real expenses; the
-`expenses` table/type exists, but the store does not currently load or blend
-expenses — treat the budget as forecast-only unless you wire that in.
+by latitude) and actual overnight stays. The budget is deliberately
+forecast-only: there is no expense logging (the old `expenses` table was
+removed).
 
 ## Working agreements
 
@@ -199,7 +213,7 @@ expenses — treat the budget as forecast-only unless you wire that in.
   `lib`, thorough explanatory comments on non-obvious decisions (caching,
   concurrency, timezone traps), and optimistic-with-rollback mutations. Keep
   that texture.
-- Before pushing, run `npm run lint` **and** `npm run build`.
+- Before pushing, run `npm run lint`, `npm test`, **and** `npm run build`.
 - Keep changes free-service-friendly and RLS-safe. If a change needs a schema
   migration, it happens in Supabase (via the Supabase MCP) and `types.ts` must
   be updated to match — the repo has no migration files to edit.

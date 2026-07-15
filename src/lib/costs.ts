@@ -28,10 +28,7 @@ export const BIG_CITY_PATTERN = /san francisco|seattle|vancouver|santa barbara/i
 /** Per person per day, USD — casual breakfast/lunch + one sit-down dinner. */
 export const FOOD_PER_PERSON_DAY = 60;
 export const ACTIVITIES_PER_PERSON_DAY = 25;
-export const MISC_PER_DAY = 12;
 
-// "misc" is intentionally excluded from the budget breakdown / trip total —
-// the ExpenseCategory type still allows it so ad-hoc expenses can be logged.
 export const CATEGORIES: ExpenseCategory[] = [
   "gas",
   "lodging",
@@ -44,7 +41,6 @@ export const CATEGORY_LABEL: Record<ExpenseCategory, string> = {
   lodging: "Lodging",
   food: "Food",
   activities: "Activities",
-  misc: "Misc",
 };
 
 export interface SeedInputs {
@@ -89,7 +85,5 @@ export function seedEstimate(cat: ExpenseCategory, s: SeedInputs): number {
       return s.foodPerDay * s.travelers * s.totalDays;
     case "activities":
       return s.activitiesPerDay * s.travelers * s.totalDays;
-    case "misc":
-      return MISC_PER_DAY * s.totalDays;
   }
 }

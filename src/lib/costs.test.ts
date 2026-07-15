@@ -5,15 +5,13 @@ import {
   CATEGORIES,
   GAS_PRICE_USD_PER_GAL,
   LODGING_PER_NIGHT,
-  MISC_PER_DAY,
   nightCost,
   seedEstimate,
   type SeedInputs,
 } from "./costs";
 
 describe("CATEGORIES", () => {
-  it("excludes misc from the budget breakdown", () => {
-    expect(CATEGORIES).not.toContain("misc");
+  it("covers exactly the four forecast categories", () => {
     expect(CATEGORIES).toEqual(["gas", "lodging", "food", "activities"]);
   });
 });
@@ -112,12 +110,5 @@ describe("seedEstimate — food & activities", () => {
   it("honors a trip-level override rate", () => {
     const inputs = baseInputs({ foodPerDay: 80, travelers: 1, totalDays: 5 });
     expect(seedEstimate("food", inputs)).toBe(80 * 1 * 5);
-  });
-});
-
-describe("seedEstimate — misc", () => {
-  it("is MISC_PER_DAY * totalDays, independent of travelers", () => {
-    const inputs = baseInputs({ totalDays: 10, travelers: 5 });
-    expect(seedEstimate("misc", inputs)).toBe(MISC_PER_DAY * 10);
   });
 });

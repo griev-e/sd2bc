@@ -28,5 +28,4 @@ export const EXPENSE_COLOR: Record<ExpenseCategory, { fg: string; bg: string }> 
   lodging: { fg: "var(--indigo)", bg: "var(--indigo-soft)" },
   food: { fg: "var(--coral)", bg: "var(--coral-soft)" },
   activities: { fg: "var(--violet)", bg: "var(--violet-soft)" },
-  misc: { fg: "var(--gold)", bg: "var(--gold-soft)" },
 };

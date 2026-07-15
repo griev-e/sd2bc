@@ -7,7 +7,7 @@ export type StopKind =
   | "beach"
   | "lodging";
 
-export type ExpenseCategory = "gas" | "lodging" | "food" | "activities" | "misc";
+export type ExpenseCategory = "gas" | "lodging" | "food" | "activities";
 
 export interface Profile {
   id: string;

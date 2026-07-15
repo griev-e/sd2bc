@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayRoutePoints, nextStopSeq, shiftDate } from "./store";
+import { dayRoutePoints, nextStopSeq, routeGeometryChanged, shiftDate } from "./store";
 import type { Day, Stop, ViaPoint } from "./types";
 
 function makeDay(id: string, seq: number): Day {
@@ -154,5 +154,62 @@ describe("shiftDate", () => {
     // across this boundary in a local timezone.
     expect(shiftDate("2026-03-07", 1)).toBe("2026-03-08");
     expect(shiftDate("2026-03-08", 1)).toBe("2026-03-09");
+  });
+});
+
+describe("routeGeometryChanged", () => {
+  const stopA = makeStop("stopA", "day1", 1, 32.7, -117.1);
+
+  it("ignores tables that never affect geometry", () => {
+    expect(routeGeometryChanged("packing_items", "UPDATE", { id: "x" }, [])).toBe(false);
+    expect(routeGeometryChanged("trips", "UPDATE", { id: "x" }, [])).toBe(false);
+  });
+
+  it("treats a genuinely new row as a geometry change", () => {
+    expect(routeGeometryChanged("stops", "INSERT", { ...stopA }, [])).toBe(true);
+  });
+
+  it("swallows the echo of an optimistic local write (identical values)", () => {
+    expect(routeGeometryChanged("stops", "INSERT", { ...stopA }, [stopA])).toBe(false);
+    expect(
+      routeGeometryChanged("stops", "UPDATE", { ...stopA, notes: "edited" }, [stopA]),
+    ).toBe(false);
+  });
+
+  it("ignores updates to non-geometry fields", () => {
+    const row = { ...stopA, name: "renamed", is_overnight: true, notes: "hi" };
+    expect(routeGeometryChanged("stops", "UPDATE", row, [stopA])).toBe(false);
+  });
+
+  it("detects a change to each geometry field", () => {
+    expect(routeGeometryChanged("stops", "UPDATE", { ...stopA, lat: 33.0 }, [stopA])).toBe(true);
+    expect(routeGeometryChanged("stops", "UPDATE", { ...stopA, lng: -118.0 }, [stopA])).toBe(true);
+    expect(routeGeometryChanged("stops", "UPDATE", { ...stopA, seq: 5 }, [stopA])).toBe(true);
+    expect(
+      routeGeometryChanged("stops", "UPDATE", { ...stopA, day_id: "day2" }, [stopA]),
+    ).toBe(true);
+  });
+
+  it("only reroutes a DELETE when the row is still held locally", () => {
+    // Realtime DELETE payloads carry the primary key only.
+    expect(routeGeometryChanged("stops", "DELETE", { id: "stopA" }, [stopA])).toBe(true);
+    expect(routeGeometryChanged("stops", "DELETE", { id: "stopA" }, [])).toBe(false);
+  });
+
+  it("cares only about seq for days", () => {
+    const day = makeDay("day1", 1);
+    expect(
+      routeGeometryChanged("days", "UPDATE", { ...day, title: "Big Sur", emoji: "🌊" }, [day]),
+    ).toBe(false);
+    expect(routeGeometryChanged("days", "UPDATE", { ...day, seq: 2 }, [day])).toBe(true);
+  });
+
+  it("tracks the owning stop and position for via points", () => {
+    const via = makeVia("via1", "stopA", 1, 32.8, -117.15);
+    expect(routeGeometryChanged("via_points", "UPDATE", { ...via }, [via])).toBe(false);
+    expect(
+      routeGeometryChanged("via_points", "UPDATE", { ...via, after_stop_id: "stopB" }, [via]),
+    ).toBe(true);
+    expect(routeGeometryChanged("via_points", "UPDATE", { ...via, lat: 33 }, [via])).toBe(true);
   });
 });

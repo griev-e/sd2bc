@@ -97,8 +97,9 @@ const inflight = new Map<string, Promise<Suggestion[]>>();
 
 /**
  * POIs within `radiusM` of a day's route corridor. Cache order: memory →
- * Supabase poi_cache (7 days, shared by both phones) → QLever, with Overpass
- * as a fallback when QLever is down.
+ * Supabase poi_cache (2 days, shared by both phones; rows are purged
+ * server-side on the same schedule) → QLever, with Overpass as a fallback
+ * when QLever is down.
  */
 export async function suggestAlongRoute(
   routeCoords: LngLat[],
@@ -143,7 +144,7 @@ async function fetchSuggestions(
   // stale "Overpass was busy" result, so fall through and re-query instead.
   if (
     hit &&
-    Date.now() - new Date(hit.updated_at).getTime() < 7 * 86400000 &&
+    Date.now() - new Date(hit.updated_at).getTime() < 2 * 86400000 &&
     Array.isArray(hit.payload) &&
     hit.payload.length > 0
   ) {
@@ -160,7 +161,7 @@ async function fetchSuggestions(
   }
 
   // Never cache an empty result — it's usually a transient hiccup, and a
-  // cached empty would wrongly say "nothing here" for the next 7 days.
+  // cached empty would wrongly say "nothing here" for the next 2 days.
   if (top.length > 0) {
     db.from("poi_cache")
       .upsert({ key, payload: top, updated_at: new Date().toISOString() })

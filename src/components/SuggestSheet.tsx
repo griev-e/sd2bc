@@ -12,6 +12,7 @@ import {
 import { KIND_COLOR } from "@/lib/colors";
 import { fmtDuration, fmtMiles } from "@/lib/format";
 import { useTrip } from "@/lib/store";
+import { useSuggestionPreview } from "@/lib/suggestionPreview";
 import type { StopKind } from "@/lib/types";
 
 const KIND_FOR_CATEGORY: Record<SuggestionCategory, StopKind> = {
@@ -106,6 +107,7 @@ function Results({
 }) {
   const routes = useTrip((s) => s.routes);
   const addStop = useTrip((s) => s.addStop);
+  const setPins = useSuggestionPreview((s) => s.setPins);
   const [results, setResults] = useState<Suggestion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
@@ -113,6 +115,13 @@ function Results({
 
   const route = dayId ? routes[dayId] : undefined;
   const hasRoute = !!route && route.coordinates.length >= 2;
+
+  // mirror the results onto the map as preview pins while the sheet is up;
+  // this component unmounts with the sheet, which clears them
+  useEffect(() => {
+    setPins(results ?? []);
+    return () => setPins([]);
+  }, [results, setPins]);
 
   useEffect(() => {
     if (!hasRoute || !route) return;

@@ -12,7 +12,6 @@ import {
   CATEGORIES,
   FOOD_PER_PERSON_DAY,
   GAS_PRICE_USD_PER_GAL,
-  MISC_PER_DAY,
   nightCost,
   seedEstimate,
   type SeedInputs,
@@ -131,7 +130,6 @@ export default function BudgetPage() {
           : "No overnights marked yet — flag stops as overnight stays",
       food: `${fmtMoney(seed.foodPerDay)}/person/day × ${travelers} × ${nDays} days`,
       activities: `${fmtMoney(seed.activitiesPerDay)}/person/day × ${travelers} × ${nDays} days`,
-      misc: `${fmtMoney(MISC_PER_DAY)}/day × ${nDays} days`,
     };
   }, [totalMiles, mpg, estimates, seed, orderedDays.length, travelers]);
 

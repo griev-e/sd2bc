@@ -167,8 +167,8 @@ export default function MorePage() {
           <p className="eyebrow mb-2">Data &amp; maps</p>
           <p className="text-xs leading-5 text-fg-muted">
             Maps © OpenFreeMap & OpenMapTiles, data © OpenStreetMap contributors.
-            Routing by OSRM. Cost figures start as regional estimates and blend in
-            your real spending as you log it.
+            Routing by OSRM. Cost figures are regional estimates that sharpen as
+            the route and overnight stays take shape.
           </p>
         </section>
 
