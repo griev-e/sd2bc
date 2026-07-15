@@ -56,6 +56,8 @@ export interface Stop {
   kind: StopKind;
   is_overnight: boolean;
   notes: string;
+  /** Street address / place description; null = none recorded. */
+  address: string | null;
   /** Booking / itinerary link for an overnight stay. */
   lodging_url: string | null;
   /** Free stay (e.g. staying with family) — counts $0 in the budget. */
