@@ -146,17 +146,20 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     // Long-press → add a real stop here.
     let pressTimer: ReturnType<typeof setTimeout> | null = null;
     let pressStart: { x: number; y: number } | null = null;
-    map.on("touchstart", (e) => {
-      if (e.points.length !== 1) return;
-      pressStart = { x: e.point.x, y: e.point.y };
-      const lngLat: LngLat = [e.lngLat.lng, e.lngLat.lat];
-      pressTimer = setTimeout(() => fireLongPress(lngLat), 550);
-    });
     const cancel = () => {
       if (pressTimer) clearTimeout(pressTimer);
       pressTimer = null;
       pressStart = null;
     };
+    map.on("touchstart", (e) => {
+      if (e.points.length !== 1) {
+        cancel(); // a second finger means pinch/rotate, not a long-press
+        return;
+      }
+      pressStart = { x: e.point.x, y: e.point.y };
+      const lngLat: LngLat = [e.lngLat.lng, e.lngLat.lat];
+      pressTimer = setTimeout(() => fireLongPress(lngLat), 550);
+    });
     map.on("touchmove", (e) => {
       if (pressStart && Math.hypot(e.point.x - pressStart.x, e.point.y - pressStart.y) > 12) cancel();
     });
@@ -230,32 +233,51 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     );
   }, [styleMode]);
 
-  // ---- stop markers (rebuilt only when the itinerary itself changes) ----------
+  // ---- stop markers (diffed in place — an edit to one stop must not tear
+  // down and recreate every marker element on the map) ------------------------
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    for (const [, m] of stopMarkers.current) m.marker.remove();
-    stopMarkers.current.clear();
-
+    const seen = new Set<string>();
     orderedDays.forEach((day, i) => {
       const color = dayColor(i, orderedDays.length);
       stopsForDay(stops, day.id).forEach((stop, si) => {
-        const el = document.createElement("div");
-        el.className = `stop-marker${stop.is_overnight ? " overnight" : ""}`;
+        seen.add(stop.id);
+        let entry = stopMarkers.current.get(stop.id);
+        if (!entry) {
+          entry = {
+            marker: new maplibregl.Marker({ element: document.createElement("div") })
+              .setLngLat([stop.lng, stop.lat])
+              .addTo(map),
+            dayId: day.id,
+          };
+          stopMarkers.current.set(stop.id, entry);
+        } else {
+          entry.marker.setLngLat([stop.lng, stop.lat]);
+          entry.dayId = day.id;
+        }
+        const el = entry.marker.getElement();
+        // preserve the selection highlight — a separate effect owns it
+        const selected = el.classList.contains("selected");
+        el.className = `stop-marker${stop.is_overnight ? " overnight" : ""}${selected ? " selected" : ""}`;
         el.style.background = color;
         el.textContent = String(si + 1);
-        el.addEventListener("click", (ev) => {
+        // onclick (not addEventListener) so re-renders replace, never stack
+        el.onclick = (ev) => {
           ev.stopPropagation();
           setSelectedStop(stop.id);
           fireSelectStop(stop);
-        });
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([stop.lng, stop.lat])
-          .addTo(map);
-        stopMarkers.current.set(stop.id, { marker, dayId: day.id });
+        };
       });
     });
+
+    for (const [id, entry] of stopMarkers.current) {
+      if (!seen.has(id)) {
+        entry.marker.remove();
+        stopMarkers.current.delete(id);
+      }
+    }
   }, [stops, orderedDays, mapReady, setSelectedStop]);
 
   // highlight the selected stop without rebuilding markers
@@ -265,32 +287,43 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     }
   }, [selectedStopId, stops]);
 
-  // ---- weather badges (one per stop cluster) ----------------------------------
+  // ---- weather badges (one per stop cluster, diffed like the stop markers) ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    for (const [, m] of weatherMarkers.current) m.marker.remove();
-    weatherMarkers.current.clear();
-
+    const seen = new Set<string>();
     for (const day of orderedDays) {
       const dayStops = stopsForDay(stops, day.id);
       for (const c of clusterStops(dayStops)) {
         const w = byCluster[clusterKey(day.id, c.repStopId)];
         if (!w) continue;
 
-        const el = document.createElement("div");
-        el.className = "weather-badge";
-        el.textContent = `${WEATHER_EMOJI[weatherKind(w.code)]} ${w.tempF}°`;
-        // float above the stop dot; never intercept the stop's tap
-        const marker = new maplibregl.Marker({
-          element: el,
-          anchor: "bottom",
-          offset: [0, -16],
-        })
-          .setLngLat([c.lng, c.lat])
-          .addTo(map);
-        weatherMarkers.current.set(c.repStopId, { marker, dayId: day.id });
+        seen.add(c.repStopId);
+        let entry = weatherMarkers.current.get(c.repStopId);
+        if (!entry) {
+          const el = document.createElement("div");
+          el.className = "weather-badge";
+          // float above the stop dot; never intercept the stop's tap
+          entry = {
+            marker: new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, -16] })
+              .setLngLat([c.lng, c.lat])
+              .addTo(map),
+            dayId: day.id,
+          };
+          weatherMarkers.current.set(c.repStopId, entry);
+        } else {
+          entry.marker.setLngLat([c.lng, c.lat]);
+          entry.dayId = day.id;
+        }
+        entry.marker.getElement().textContent = `${WEATHER_EMOJI[weatherKind(w.code)]} ${w.tempF}°`;
+      }
+    }
+
+    for (const [id, entry] of weatherMarkers.current) {
+      if (!seen.has(id)) {
+        entry.marker.remove();
+        weatherMarkers.current.delete(id);
       }
     }
   }, [stops, orderedDays, mapReady, byCluster]);

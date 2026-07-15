@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   bboxOf,
-  distToPolylineM,
   distToSegmentM,
   hashKey,
   haversineM,
@@ -43,20 +42,6 @@ describe("distToSegmentM", () => {
   it("handles a zero-length segment as a point distance", () => {
     const d = distToSegmentM([1, 1], [0, 0], [0, 0]);
     expect(d).toBeCloseTo(haversineM([1, 1], [0, 0]), -2);
-  });
-});
-
-describe("distToPolylineM", () => {
-  it("returns the minimum distance across all segments", () => {
-    const line: LngLat[] = [
-      [0, 0],
-      [0, 1],
-      [1, 1],
-    ];
-    // Point near the second segment's midpoint should be near 0, much
-    // closer than to the first segment.
-    const d = distToPolylineM([0.5, 1], line);
-    expect(d).toBeLessThan(distToSegmentM([0.5, 1], line[0], line[1]));
   });
 });
 

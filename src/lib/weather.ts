@@ -103,6 +103,8 @@ interface WeatherState {
 let lastKey = "";
 let lastFetched = 0;
 let inflight = false;
+/** Latest sync args that arrived while a fetch was inflight — replayed after. */
+let queued: [Day[], Stop[], Record<string, number>] | null = null;
 
 export const useWeather = create<WeatherState>((set) => ({
   byDay: {},
@@ -157,6 +159,7 @@ export const useWeather = create<WeatherState>((set) => ({
       // reset the cache key too, or re-adding the same stops within the TTL
       // would be treated as "already fetched" and stay blank
       lastKey = "";
+      queued = null; // an older queued sync must not resurrect this state
       set({ byDay: {}, byCluster: {} });
       return;
     }
@@ -164,7 +167,13 @@ export const useWeather = create<WeatherState>((set) => ({
     const key = targets
       .map((t) => `${t.clusterKey}:${t.date}@${t.hour}:${t.lat.toFixed(2)},${t.lng.toFixed(2)}`)
       .join("|");
-    if (inflight || (key === lastKey && Date.now() - lastFetched < 30 * 60000)) return;
+    if (inflight) {
+      // don't drop it — routes settle day by day during startup, and the last
+      // call carries the final arrival hours; replay it once the fetch ends
+      queued = [days, stops, arrivalMin];
+      return;
+    }
+    if (key === lastKey && Date.now() - lastFetched < 30 * 60000) return;
     inflight = true;
 
     const dates = targets.map((t) => t.date).sort();
@@ -245,6 +254,11 @@ export const useWeather = create<WeatherState>((set) => ({
       })
       .finally(() => {
         inflight = false;
+        if (queued) {
+          const args = queued;
+          queued = null;
+          useWeather.getState().sync(...args);
+        }
       });
   },
 }));

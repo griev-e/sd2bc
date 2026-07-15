@@ -39,5 +39,3 @@ export const NOMINATIM_URL = "https://nominatim.openstreetmap.org";
 
 export const MAP_STYLE_LIGHT = "https://tiles.openfreemap.org/styles/positron";
 export const MAP_STYLE_DARK = "https://tiles.openfreemap.org/styles/dark";
-
-export const TRIP_START = "2026-07-27";

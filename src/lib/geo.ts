@@ -35,16 +35,6 @@ export function distToSegmentM(p: LngLat, a: LngLat, b: LngLat): number {
   return (degDist * Math.PI * R) / 180;
 }
 
-/** Minimum distance (meters) from p to a polyline. */
-export function distToPolylineM(p: LngLat, line: LngLat[]): number {
-  let min = Infinity;
-  for (let i = 0; i < line.length - 1; i++) {
-    const d = distToSegmentM(p, line[i], line[i + 1]);
-    if (d < min) min = d;
-  }
-  return min;
-}
-
 /** Downsample a polyline so consecutive points are >= stepM apart. */
 export function samplePolyline(line: LngLat[], stepM: number, maxPoints = 90): LngLat[] {
   if (line.length === 0) return [];

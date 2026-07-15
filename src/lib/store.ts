@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { supabase } from "./supabase";
-import { fetchRoute } from "./osrm";
+import { fetchRoute, primeRouteCache } from "./osrm";
 import type { LngLat } from "./geo";
 import type {
   ActivityEntry,
@@ -48,6 +48,9 @@ interface TripState {
 
   init: (userId: string) => Promise<void>;
   teardown: () => void;
+
+  /** Debounced route recompute — for callers outside the store (e.g. shaping). */
+  refreshRoutes: () => void;
 
   setSelectedDay: (dayId: string | null) => void;
   setSelectedStop: (stopId: string | null) => void;
@@ -211,6 +214,17 @@ export const useTrip = create<TripState>((set, get) => {
     const ordered = sortDays(days);
     set({ routesPending: true, routeError: null });
 
+    // One batched Supabase read warms the shared route cache for every day at
+    // once — on a cold app start this replaces a round trip per day.
+    await primeRouteCache(
+      ordered.map((day, i) =>
+        dayRoutePoints(day, i > 0 ? ordered[i - 1] : null, stops, viaPoints).map(
+          (p) => p.lngLat,
+        ),
+      ),
+    );
+    if (run !== routeRun) return; // superseded while priming
+
     const next: Record<string, DayRoute> = {};
     let firstError: unknown = null;
     let cursor = 0;
@@ -242,6 +256,39 @@ export const useTrip = create<TripState>((set, get) => {
     }
   }
 
+  // Fields that feed dayRoutePoints() per table — only changes to these can
+  // move the drawn route, so anything else (notes, titles, overnight flags…)
+  // shouldn't kick off a recompute or flash the "routing…" pill.
+  const ROUTE_FIELDS: Partial<Record<Tables, string[]>> = {
+    stops: ["day_id", "seq", "lat", "lng"],
+    days: ["seq"],
+    via_points: ["after_stop_id", "seq", "lat", "lng"],
+  };
+
+  /**
+   * Does this Realtime event actually change route geometry? Our own writes
+   * echo back from the channel with values identical to the optimistic local
+   * state, so comparing against the existing row also swallows the redundant
+   * recompute after every local mutation.
+   */
+  function routeGeometryChanged(
+    table: Tables,
+    evt: "INSERT" | "UPDATE" | "DELETE",
+    row: Record<string, unknown>,
+    list: { id: string }[],
+  ): boolean {
+    const fields = ROUTE_FIELDS[table];
+    if (!fields) return false;
+    const existing = list.find((r) => r.id === row.id) as
+      | Record<string, unknown>
+      | undefined;
+    // DELETE payloads carry only the primary key — it matters iff we still
+    // hold the row (i.e. this wasn't already applied optimistically).
+    if (evt === "DELETE") return existing !== undefined;
+    if (!existing) return true;
+    return fields.some((f) => f in row && row[f] !== existing[f]);
+  }
+
   function applyChange(table: Tables, evt: "INSERT" | "UPDATE" | "DELETE", row: Record<string, unknown>) {
     const id = row.id as string;
     const upsert = <T extends { id: string }>(list: T[]): T[] => {
@@ -256,16 +303,16 @@ export const useTrip = create<TripState>((set, get) => {
     const s = get();
     switch (table) {
       case "days":
+        if (routeGeometryChanged(table, evt, row, s.days)) scheduleRoutes();
         set({ days: upsert(s.days) });
-        scheduleRoutes();
         break;
       case "stops":
+        if (routeGeometryChanged(table, evt, row, s.stops)) scheduleRoutes();
         set({ stops: upsert(s.stops) });
-        scheduleRoutes();
         break;
       case "via_points":
+        if (routeGeometryChanged(table, evt, row, s.viaPoints)) scheduleRoutes();
         set({ viaPoints: upsert(s.viaPoints) });
-        scheduleRoutes();
         break;
       case "packing_items":
         set({ packing: upsert(s.packing) });
@@ -362,8 +409,34 @@ export const useTrip = create<TripState>((set, get) => {
         supabase().removeChannel(channel);
         channel = null;
       }
-      set({ loaded: false, userId: null });
+      // invalidate any in-flight route batch and pending debounce
+      routeRun++;
+      if (routeTimer) {
+        clearTimeout(routeTimer);
+        routeTimer = null;
+      }
+      // drop all entity state so nothing from this session flashes for the
+      // next sign-in
+      set({
+        loaded: false,
+        userId: null,
+        profiles: [],
+        trip: null,
+        days: [],
+        stops: [],
+        viaPoints: [],
+        packing: [],
+        activity: [],
+        gameEvents: [],
+        routes: {},
+        routesPending: false,
+        routeError: null,
+        selectedDayId: null,
+        selectedStopId: null,
+      });
     },
+
+    refreshRoutes: () => scheduleRoutes(),
 
     setSelectedDay: (dayId) => set({ selectedDayId: dayId }),
     setSelectedStop: (stopId) => set({ selectedStopId: stopId }),
@@ -395,6 +468,7 @@ export const useTrip = create<TripState>((set, get) => {
         updated_at: now,
       };
       set({ stops: [...s.stops, row] });
+      scheduleRoutes();
       const { error } = await supabase().from("stops").insert({
         id: row.id,
         trip_id: row.trip_id,
@@ -407,7 +481,10 @@ export const useTrip = create<TripState>((set, get) => {
         created_by: s.userId,
         updated_by: s.userId,
       });
-      if (error) set({ stops: get().stops.filter((x) => x.id !== row.id) });
+      if (error) {
+        set({ stops: get().stops.filter((x) => x.id !== row.id) });
+        scheduleRoutes();
+      }
     },
 
     updateStop: async (id, patch) => {
@@ -417,6 +494,7 @@ export const useTrip = create<TripState>((set, get) => {
           x.id === id ? { ...x, ...patch, updated_by: s.userId } : x,
         ),
       });
+      if (["day_id", "seq", "lat", "lng"].some((f) => f in patch)) scheduleRoutes();
       await supabase()
         .from("stops")
         .update({ ...patch, updated_by: s.userId })
@@ -430,6 +508,7 @@ export const useTrip = create<TripState>((set, get) => {
         viaPoints: s.viaPoints.filter((v) => v.after_stop_id !== id),
         selectedStopId: s.selectedStopId === id ? null : s.selectedStopId,
       });
+      scheduleRoutes();
       await supabase().from("stops").delete().eq("id", id);
     },
 
@@ -441,6 +520,7 @@ export const useTrip = create<TripState>((set, get) => {
         return seq !== undefined ? { ...x, seq } : x;
       });
       set({ stops: updated });
+      scheduleRoutes();
       const db = supabase();
       await Promise.all(
         orderedIds.map((id, i) =>
@@ -455,6 +535,7 @@ export const useTrip = create<TripState>((set, get) => {
       set({
         stops: s.stops.map((x) => (x.id === stopId ? { ...x, day_id: dayId, seq } : x)),
       });
+      scheduleRoutes();
       await supabase()
         .from("stops")
         .update({ day_id: dayId, seq, updated_by: s.userId })
@@ -475,6 +556,7 @@ export const useTrip = create<TripState>((set, get) => {
         created_at: new Date().toISOString(),
       };
       set({ viaPoints: [...s.viaPoints, row] });
+      scheduleRoutes();
       const { error } = await supabase().from("via_points").insert({
         id: row.id,
         trip_id: row.trip_id,
@@ -484,18 +566,23 @@ export const useTrip = create<TripState>((set, get) => {
         lng,
         created_by: s.userId,
       });
-      if (error) set({ viaPoints: get().viaPoints.filter((v) => v.id !== row.id) });
+      if (error) {
+        set({ viaPoints: get().viaPoints.filter((v) => v.id !== row.id) });
+        scheduleRoutes();
+      }
     },
 
     moveViaPoint: async (id, lng, lat) => {
       set({
         viaPoints: get().viaPoints.map((v) => (v.id === id ? { ...v, lng, lat } : v)),
       });
+      scheduleRoutes();
       await supabase().from("via_points").update({ lng, lat }).eq("id", id);
     },
 
     deleteViaPoint: async (id) => {
       set({ viaPoints: get().viaPoints.filter((v) => v.id !== id) });
+      scheduleRoutes();
       await supabase().from("via_points").delete().eq("id", id);
     },
 
@@ -513,7 +600,7 @@ export const useTrip = create<TripState>((set, get) => {
       const row: Day = {
         id: crypto.randomUUID(),
         trip_id: s.trip.id,
-        seq: ordered.length + 1,
+        seq: (last?.seq ?? 0) + 1,
         date: last ? shiftDate(last.date, 1) : s.trip.start_date,
         title: "",
         notes: "",
@@ -604,7 +691,8 @@ export const useTrip = create<TripState>((set, get) => {
         checked: false,
         checked_by: null,
         assigned_to,
-        seq: s.packing.filter((p) => p.category === category).length + 1,
+        // max + 1, never count + 1 — deletions leave gaps
+        seq: s.packing.reduce((m, p) => (p.category === category && p.seq > m ? p.seq : m), 0) + 1,
         created_by: s.userId,
         updated_by: s.userId,
         created_at: now,
