@@ -142,6 +142,9 @@ export const useWeather = create<WeatherState>((set) => ({
     }
 
     if (targets.length === 0) {
+      // reset the cache key too, or re-adding the same stops within the TTL
+      // would be treated as "already fetched" and stay blank
+      lastKey = "";
       set({ byDay: {}, byCluster: {} });
       return;
     }

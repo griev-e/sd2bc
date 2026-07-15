@@ -97,15 +97,6 @@ export function IconMoon({ size = 18, className, strokeWidth = 1.8 }: IconProps)
   );
 }
 
-export function IconWallet({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
-      <path d="M15 12.5h5v3h-5a1.5 1.5 0 0 1 0-3Z" />
-    </svg>
-  );
-}
-
 export function IconReceipt({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
   return (
     <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
@@ -148,30 +139,6 @@ export function IconGrip({ size = 16, className, strokeWidth = 1.6 }: IconProps)
   );
 }
 
-export function IconChevronRight({ size = 16, className, strokeWidth = 1.8 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <path d="m9 5 7 7-7 7" />
-    </svg>
-  );
-}
-
-export function IconFrame({ size = 18, className, strokeWidth = 1.7 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <path d="M8 3H4.5A1.5 1.5 0 0 0 3 4.5V8m13-5h3.5A1.5 1.5 0 0 1 21 4.5V8m0 8v3.5a1.5 1.5 0 0 1-1.5 1.5H16m-8 0H4.5A1.5 1.5 0 0 1 3 19.5V16" />
-    </svg>
-  );
-}
-
-export function IconCheck({ size = 14, className, strokeWidth = 2.2 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <path d="m4.5 12.5 5 5 10-11" />
-    </svg>
-  );
-}
-
 export function IconUmbrella({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
   return (
     <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
@@ -187,14 +154,6 @@ export function IconCamera({ size = 18, className, strokeWidth = 1.8 }: IconProp
     <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
       <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.4-2.1A2 2 0 0 1 11 4h2a2 2 0 0 1 1.6.9L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-9Z" />
       <circle cx="12" cy="13" r="3.2" />
-    </svg>
-  );
-}
-
-export function IconSignout({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <path d="M14 4h-8a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h8M10 12h10m0 0-3.5-3.5M20 12l-3.5 3.5" />
     </svg>
   );
 }
@@ -257,22 +216,6 @@ export function IconStorm({ size = 18, className, strokeWidth = 1.8 }: IconProps
 }
 
 /* ---- games & map ---- */
-export function IconDice({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <rect x="4" y="4" width="16" height="16" rx="4" />
-      <path d="M8.6 8.6v.01M15.4 8.6v.01M12 12v.01M8.6 15.4v.01M15.4 15.4v.01" strokeWidth="2.6" />
-    </svg>
-  );
-}
-export function IconTrophy({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" />
-      <path d="M8 5.5H5a3 3 0 0 0 3 4.4M16 5.5h3a3 3 0 0 1-3 4.4M12 13v3.5m-3.5 3.5h7m-5.5 0 .7-3.5h2.6l.7 3.5" />
-    </svg>
-  );
-}
 export function IconCrown({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
   return (
     <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
@@ -317,15 +260,6 @@ export function IconLink({ size = 18, className, strokeWidth = 1.8 }: IconProps)
   return (
     <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
       <path d="M9.5 14.5 14.5 9.5M8.5 11 6.8 12.7a3.3 3.3 0 0 0 4.7 4.7l1.7-1.7M15.5 13l1.7-1.7a3.3 3.3 0 0 0-4.7-4.7L10.8 8.3" />
-    </svg>
-  );
-}
-
-export function IconClock({ size = 18, className, strokeWidth = 1.8 }: IconProps) {
-  return (
-    <svg {...base(size)} className={className} strokeWidth={strokeWidth}>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M12 7.5V12l3 2" />
     </svg>
   );
 }

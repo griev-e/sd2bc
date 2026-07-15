@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
-import { computeSchedule } from "@/lib/schedule";
+import { getSchedule } from "@/lib/schedule";
 import { supabase } from "@/lib/supabase";
 import { useTrip } from "@/lib/store";
 import { useWeather } from "@/lib/weather";
@@ -22,8 +22,7 @@ export default function TabsLayout({ children }: { children: React.ReactNode }) 
   // each cluster is sampled at its estimated arrival hour
   useEffect(() => {
     if (!loaded) return;
-    const ordered = [...days].sort((a, b) => a.seq - b.seq);
-    const schedule = computeSchedule(ordered, stops, routes);
+    const schedule = getSchedule(days, stops, routes);
     const arrivalMin: Record<string, number> = {};
     for (const [stopId, s] of schedule) arrivalMin[stopId] = s.arrivalMin;
     syncWeather(days, stops, arrivalMin);

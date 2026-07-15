@@ -56,9 +56,12 @@ interface OverpassElement {
   tags?: Record<string, string>;
 }
 
+const memCache = new Map<string, Suggestion[]>();
+const inflight = new Map<string, Promise<Suggestion[]>>();
+
 /**
- * POIs within `radiusM` of a day's route corridor. Results cached in
- * Supabase (7 days) so both phones and repeat visits skip Overpass.
+ * POIs within `radiusM` of a day's route corridor. Cache order: memory →
+ * Supabase poi_cache (7 days, shared by both phones) → Overpass.
  */
 export async function suggestAlongRoute(
   routeCoords: LngLat[],
@@ -70,6 +73,29 @@ export async function suggestAlongRoute(
   const chain = sampled.map(([lng, lat]) => `${lat.toFixed(4)},${lng.toFixed(4)}`).join(",");
   const key = `poi-v2-${category}-${radiusM}-${hashKey(chain)}`;
 
+  const cached = memCache.get(key);
+  if (cached) return cached;
+  const pending = inflight.get(key);
+  if (pending) return pending;
+
+  const p = fetchSuggestions(key, sampled, chain, category, radiusM);
+  inflight.set(key, p);
+  try {
+    const result = await p;
+    memCache.set(key, result);
+    return result;
+  } finally {
+    inflight.delete(key);
+  }
+}
+
+async function fetchSuggestions(
+  key: string,
+  sampled: LngLat[],
+  chain: string,
+  category: SuggestionCategory,
+  radiusM: number,
+): Promise<Suggestion[]> {
   const db = supabase();
   const { data: hit } = await db
     .from("poi_cache")
