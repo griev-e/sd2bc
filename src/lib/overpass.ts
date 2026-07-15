@@ -175,7 +175,7 @@ async function fetchSuggestions(
  * places people care about accumulate tags (hours, website, cuisine, …) and
  * Wikipedia/Wikidata links — both discriminate surprisingly well.
  */
-function scoreCandidate(c: Candidate, category: SuggestionCategory): number {
+export function scoreCandidate(c: Candidate, category: SuggestionCategory): number {
   let s = Math.min(c.facts, 25);
   if (c.tags.wikipedia || c.tags.wikidata) s += 20;
   const stars = parseFloat(c.tags.stars ?? "");
@@ -195,7 +195,7 @@ const MAX_RESULTS = 25;
  * closeness, then round-robin across sections of the route so suggestions
  * cover the whole day's drive. Final order follows the drive.
  */
-function rankCandidates(
+export function rankCandidates(
   candidates: Candidate[],
   sampled: LngLat[],
   category: SuggestionCategory,

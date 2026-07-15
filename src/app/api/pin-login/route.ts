@@ -19,7 +19,7 @@ const TRAVELERS: Record<string, string> = {
   hailey: "hlyphn@coastline.app",
 };
 
-function pinMatches(given: string, expected: string): boolean {
+export function pinMatches(given: string, expected: string): boolean {
   // constant-time compare over equal-length buffers
   const a = Buffer.from(given.padEnd(64, "\0").slice(0, 64));
   const b = Buffer.from(expected.padEnd(64, "\0").slice(0, 64));
