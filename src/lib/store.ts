@@ -102,13 +102,18 @@ function sortDays(days: Day[]): Day[] {
 }
 
 /** 'YYYY-MM-DD' + n days, timezone-proof. */
-function shiftDate(iso: string, n: number): string {
+export function shiftDate(iso: string, n: number): string {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + n);
   return d.toISOString().slice(0, 10);
 }
 function sortStops(stops: Stop[]): Stop[] {
   return [...stops].sort((a, b) => a.seq - b.seq);
+}
+
+/** Next seq for a new stop in a day: max(existing) + 1, never count + 1 — deletions leave gaps. */
+export function nextStopSeq(stops: Stop[], dayId: string): number {
+  return stops.reduce((m, x) => (x.day_id === dayId && x.seq > m ? x.seq : m), 0) + 1;
 }
 
 /** Ordered point list for one day's route; null stopId = shaping point. */
@@ -366,9 +371,7 @@ export const useTrip = create<TripState>((set, get) => {
     addStop: async (dayId, stop) => {
       const s = get();
       if (!s.trip) return;
-      // max+1, not count+1 — deletions leave seq gaps and count+1 would collide
-      const nextSeq =
-        s.stops.reduce((m, x) => (x.day_id === dayId && x.seq > m ? x.seq : m), 0) + 1;
+      const nextSeq = nextStopSeq(s.stops, dayId);
       const now = new Date().toISOString();
       const row: Stop = {
         id: crypto.randomUUID(),
@@ -448,8 +451,7 @@ export const useTrip = create<TripState>((set, get) => {
 
     moveStopToDay: async (stopId, dayId) => {
       const s = get();
-      const seq =
-        s.stops.reduce((m, x) => (x.day_id === dayId && x.seq > m ? x.seq : m), 0) + 1;
+      const seq = nextStopSeq(s.stops, dayId);
       set({
         stops: s.stops.map((x) => (x.id === stopId ? { ...x, day_id: dayId, seq } : x)),
       });
