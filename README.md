@@ -1,7 +1,6 @@
 # Coastline
 
-A two-person road-trip command center for **San Diego → Vancouver → San Diego**,
-departing July 27, 2026. Glass UI over a live map, realtime sync between two
+Glass UI over a live map, realtime sync between two
 phones, progressive cost forecasting — built on entirely free, keyless services.
 
 ## Stack
