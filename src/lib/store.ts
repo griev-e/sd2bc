@@ -644,15 +644,19 @@ export const useTrip = create<TripState>((set, get) => {
       });
       set({ stops: updated });
       scheduleRoutes();
-      // one round trip for the whole day — the rows all exist, so the upsert
-      // takes the ON CONFLICT UPDATE path
-      const { error } = await supabase()
-        .from("stops")
-        .upsert(
-          orderedIds.map((id, i) => ({ id, seq: i + 1, updated_by: s.userId })),
-          { onConflict: "id" },
-        );
-      if (error) {
+      // One UPDATE per row, in parallel. A partial upsert can't renumber
+      // here: Postgres constraint-checks the INSERT tuple *before* taking
+      // the ON CONFLICT UPDATE path, so rows missing NOT NULL columns
+      // (trip_id, name, lat…) are rejected even though every row exists.
+      const results = await Promise.all(
+        orderedIds.map((id, i) =>
+          supabase()
+            .from("stops")
+            .update({ seq: i + 1, updated_by: s.userId })
+            .eq("id", id),
+        ),
+      );
+      if (results.some((r) => r.error)) {
         set({ stops: prevStops });
         scheduleRoutes();
       }
@@ -777,13 +781,15 @@ export const useTrip = create<TripState>((set, get) => {
       }
       if (!error) ({ error } = await db.from("days").delete().eq("id", id));
       if (!error && remaining.length > 0) {
-        // renumber every surviving day in one round trip
-        ({ error } = await db
-          .from("days")
-          .upsert(
-            remaining.map((d) => ({ id: d.id, seq: d.seq, date: d.date })),
-            { onConflict: "id" },
-          ));
+        // renumber every surviving day — one UPDATE per row, since a
+        // partial upsert trips days' NOT NULL columns (trip_id) on the
+        // INSERT half of ON CONFLICT even when every row already exists
+        const results = await Promise.all(
+          remaining.map((d) =>
+            db.from("days").update({ seq: d.seq, date: d.date }).eq("id", d.id),
+          ),
+        );
+        error = results.find((r) => r.error)?.error ?? null;
       }
       // multi-statement delete — on any failure re-pull truth rather than
       // trying to guess which parts landed
