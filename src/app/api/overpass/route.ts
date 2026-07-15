@@ -9,9 +9,12 @@ import { NextRequest, NextResponse } from "next/server";
  */
 export const maxDuration = 60;
 
+// NOTE: overpass.kumi.systems is a DNS alias for overpass.private.coffee —
+// listing both would "hedge" onto the same box twice. The VK/mail.ru mirror
+// is a genuinely independent full-planet instance.
 const ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
 ];
 const STAGGER_MS = 4000;
