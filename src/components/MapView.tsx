@@ -8,8 +8,10 @@ import { IconLayers } from "./Icons";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor } from "@/lib/colors";
 import { bboxOf, type LngLat } from "@/lib/geo";
+import { SUGGESTION_CATEGORIES } from "@/lib/overpass";
 import { insertShapingPoint } from "@/lib/shaping";
 import { stopsForDay, useTrip } from "@/lib/store";
+import { useSuggestionPreview } from "@/lib/suggestionPreview";
 import { effectiveDark } from "@/lib/theme";
 import { useWeather, WEATHER_EMOJI, weatherKind } from "@/lib/weather";
 import type { Stop } from "@/lib/types";
@@ -23,6 +25,10 @@ type StyleMode = "street" | "satellite";
 
 const STYLE_PREF_KEY = "coastline-map-style";
 const SHOW_VIAS_KEY = "coastline-show-vias";
+
+const CATEGORY_ICON = Object.fromEntries(
+  SUGGESTION_CATEGORIES.map((c) => [c.key, c.icon]),
+) as Record<string, string>;
 
 /** Route source + line layers — added on load and re-added after setStyle. */
 function addRouteLayers(map: MLMap, mode: StyleMode, dark: boolean) {
@@ -61,6 +67,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   const stopMarkers = useRef(new Map<string, { marker: Marker; dayId: string }>());
   const viaMarkers = useRef(new Map<string, Marker>());
   const weatherMarkers = useRef(new Map<string, { marker: Marker; dayId: string }>());
+  const suggestionMarkers = useRef<Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const [selectedVia, setSelectedVia] = useState<string | null>(null);
   const [styleMode, setStyleMode] = useState<StyleMode>(() =>
@@ -340,6 +347,29 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       marker.getElement().style.opacity = dimFor(dayId);
     }
   }, [selectedDayId, stops, orderedDays, byCluster, mapReady]);
+
+  // ---- suggestion preview pins (while the suggest sheet shows results) --------
+  const suggestionPins = useSuggestionPreview((s) => s.pins);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    // the set changes wholesale per category fetch — rebuild is the diff
+    for (const m of suggestionMarkers.current) m.remove();
+    suggestionMarkers.current = [];
+
+    for (const s of suggestionPins) {
+      const el = document.createElement("div");
+      el.className = "suggestion-pin";
+      el.textContent = CATEGORY_ICON[s.category] ?? "📍";
+      el.title = s.name;
+      suggestionMarkers.current.push(
+        new maplibregl.Marker({ element: el, anchor: "bottom" })
+          .setLngLat([s.lng, s.lat])
+          .addTo(map),
+      );
+    }
+  }, [suggestionPins, mapReady]);
 
   // ---- via (shaping) markers ---------------------------------------------------
   useEffect(() => {

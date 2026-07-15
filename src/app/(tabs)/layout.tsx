@@ -13,6 +13,8 @@ export default function TabsLayout({ children }: { children: React.ReactNode }) 
   const [ready, setReady] = useState(false);
   const init = useTrip((s) => s.init);
   const loaded = useTrip((s) => s.loaded);
+  const loadError = useTrip((s) => s.loadError);
+  const userId = useTrip((s) => s.userId);
   const days = useTrip((s) => s.days);
   const stops = useTrip((s) => s.stops);
   const routes = useTrip((s) => s.routes);
@@ -43,6 +45,25 @@ export default function TabsLayout({ children }: { children: React.ReactNode }) 
     });
     return () => sub.subscription.unsubscribe();
   }, [router, init]);
+
+  // Initial load failed with nothing cached to fall back on — say so and
+  // offer a retry instead of skeletons that never resolve.
+  if (ready && !loaded && loadError) {
+    return (
+      <div className="flex h-dvh flex-col items-center justify-center gap-4 px-8 text-center">
+        <p className="text-sm font-semibold">Couldn&apos;t load the trip</p>
+        <p className="text-xs leading-5 text-fg-muted">
+          Looks like the connection dropped. Check your signal and try again.
+        </p>
+        <button
+          onClick={() => userId && void init(userId)}
+          className="btn-primary pressable h-11 rounded-xl px-8 text-sm font-semibold"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (!ready || !loaded) {
     return (

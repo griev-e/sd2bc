@@ -23,10 +23,10 @@ phones, progressive cost forecasting — built on entirely free, keyless service
   per-segment miles + drive time, arrival estimates, overnight flags, notes.
 - **Long-press the map** to add a real stop anywhere; **"Suggest nearby"** pulls
   food / gas / viewpoints / beaches / lodging along the day's route corridor.
-- **Budget** — seeded 2026 regional averages (gas $/gal per state, lodging/night,
-  meals) that blend into a live forecast as real expenses are logged (3+ entries
-  per category → your averages win). Editable MPG, per-category bullet bars,
-  50/50 split summary, expense log.
+- **Budget** — a live forecast seeded from 2026 regional averages (gas $/gal per
+  state, lodging/night, meals) that sharpens as the route and overnight stays
+  take shape. Editable MPG and per-person/day rates, per-category breakdown
+  with day-by-day trend bars.
 - **Packing** — pre-seeded shared checklist, assignment (me / her / shared),
   attribution dots, live sync.
 - **Realtime** — every table syncs between both phones via Supabase Realtime
@@ -57,7 +57,7 @@ all data access is enforced by Row Level Security (authenticated-only).
 ## Supabase layout
 
 Tables: `profiles`, `trips`, `days`, `stops`, `via_points` (route shaping),
-`expenses`, `packing_items`, `route_cache`, `poi_cache`, `activity_log`.
+`packing_items`, `route_cache`, `poi_cache`, `activity_log`.
 All tables have RLS (authenticated role only — the app is a private two-person
 workspace). Realtime publication covers every shared table. Triggers maintain
 `updated_at` and write the activity feed. The `signup` edge function creates
@@ -71,5 +71,5 @@ Migrations live in the Supabase project (`coastline_schema`, `coastline_seed`,
 - OSRM responses are cached in `route_cache` (memory → Supabase → network) and
   keyed by the exact waypoint list, so re-opens and the second phone never
   re-fetch. Route recomputes are debounced 500 ms.
-- Overpass results are cached 7 days in `poi_cache`.
+- Overpass results are cached 2 days in `poi_cache`; a daily pg_cron job purges stale `route_cache`/`poi_cache` rows.
 - Nominatim search is debounced 450 ms and only fires from explicit user input.

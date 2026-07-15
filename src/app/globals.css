@@ -398,6 +398,20 @@ body {
 .via-marker:active {
   cursor: grabbing;
 }
+.suggestion-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px 9px 9px 2px;
+  font-size: 13px;
+  line-height: 1;
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
 
 /* per-cluster weather badge floating above a stop */
 .weather-badge {

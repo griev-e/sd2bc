@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
+import RegisterSW from "@/components/RegisterSW";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -58,6 +59,7 @@ export default function RootLayout({
               '(function(){try{var t=localStorage.getItem("coastline-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;var a=localStorage.getItem("coastline-accent");if(a&&a!=="ocean")document.documentElement.dataset.accent=a}catch(e){}})()',
           }}
         />
+        <RegisterSW />
         {children}
       </body>
     </html>
