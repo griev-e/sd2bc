@@ -32,7 +32,7 @@ import { dayEmoji, NATURE_EMOJI } from "@/lib/emoji";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
 import { type StopSchedule, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
-import { type HourWeather, useWeather, weatherKind } from "@/lib/weather";
+import { type ClusterWeather, useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
 
 export default function DaysPage() {
@@ -159,7 +159,7 @@ function DayCard({
   // representative (first) stop only.
   const byCluster = useWeather((s) => s.byCluster);
   const clusterWeather = useMemo(() => {
-    const map = new Map<string, HourWeather>();
+    const map = new Map<string, ClusterWeather>();
     for (const c of clusterStops(dayStops)) {
       const w = byCluster[clusterKey(day.id, c.repStopId)];
       if (w) map.set(c.repStopId, w);
@@ -410,7 +410,7 @@ function SortableStop({
   stop: Stop;
   isLast: boolean;
   sched?: StopSchedule;
-  weather?: HourWeather;
+  weather?: ClusterWeather;
   seg?: { distanceM: number; durationS: number };
   onTap: () => void;
 }) {
