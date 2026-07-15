@@ -18,7 +18,7 @@ export const KIND_COLOR: Record<StopKind, { fg: string; bg: string }> = {
   scenic: { fg: "var(--gold)", bg: "var(--gold-soft)" },
   food: { fg: "var(--coral)", bg: "var(--coral-soft)" },
   fuel: { fg: "var(--slate)", bg: "var(--slate-soft)" },
-  activity: { fg: "var(--violet)", bg: "var(--violet-soft)" },
+  activity: { fg: "var(--green)", bg: "var(--green-soft)" },
   beach: { fg: "var(--sky)", bg: "var(--sky-soft)" },
   lodging: { fg: "var(--indigo)", bg: "var(--indigo-soft)" },
 };
@@ -27,5 +27,5 @@ export const EXPENSE_COLOR: Record<ExpenseCategory, { fg: string; bg: string }> 
   gas: { fg: "var(--slate)", bg: "var(--slate-soft)" },
   lodging: { fg: "var(--indigo)", bg: "var(--indigo-soft)" },
   food: { fg: "var(--coral)", bg: "var(--coral-soft)" },
-  activities: { fg: "var(--violet)", bg: "var(--violet-soft)" },
+  activities: { fg: "var(--green)", bg: "var(--green-soft)" },
 };
