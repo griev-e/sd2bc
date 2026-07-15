@@ -181,6 +181,7 @@ function Results({
       <div className="no-scrollbar -mx-5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-2">
         {results.map((s) => {
           const isAdded = added.has(s.id);
+          const detail = detailFor(s);
           return (
             <div key={s.id} className="card flex w-44 flex-shrink-0 snap-start flex-col p-3.5">
               <div
@@ -200,9 +201,9 @@ function Results({
                 )}
                 {s.name}
               </p>
-              {detailFor(s) && (
+              {detail && (
                 <p className="mt-0.5 line-clamp-1 text-[11px] font-medium text-fg-muted">
-                  {detailFor(s)}
+                  {detail}
                 </p>
               )}
               <p className="tnum mb-2.5 mt-1 text-[11px] text-fg-muted">

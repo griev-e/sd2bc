@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Sheet from "./Sheet";
 import { IconPin } from "./Icons";
 import { geocode, type GeocodeResult } from "@/lib/geocode";
@@ -36,20 +36,37 @@ function SearchContent({
   const [results, setResults] = useState<GeocodeResult[]>([]);
   const [searching, setSearching] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // monotonically increasing request id — a slow early response must never
+  // overwrite the results of a later query
+  const requestSeq = useRef(0);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+      requestSeq.current++; // orphan any in-flight search on unmount
+    },
+    [],
+  );
 
   function onChange(v: string) {
     setQuery(v);
     if (timer.current) clearTimeout(timer.current);
     if (v.trim().length < 3) {
+      requestSeq.current++;
       setResults([]);
+      setSearching(false);
       return;
     }
     timer.current = setTimeout(async () => {
+      const id = ++requestSeq.current;
       setSearching(true);
       try {
-        setResults(await geocode(v));
+        const found = await geocode(v);
+        if (id === requestSeq.current) setResults(found);
+      } catch {
+        if (id === requestSeq.current) setResults([]);
       } finally {
-        setSearching(false);
+        if (id === requestSeq.current) setSearching(false);
       }
     }, 450);
   }

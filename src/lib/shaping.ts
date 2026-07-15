@@ -48,15 +48,20 @@ export async function insertShapingPoint(dayId: string, lngLat: LngLat): Promise
   // Renumber the rest of the gap so ordering stays stable.
   const db = supabase();
   const updates: Promise<unknown>[] = [];
+  let renumbered = false;
   gapVias.forEach((viaId, i) => {
     const newSeq = i < position ? i : i + 1;
     const current = useTrip.getState().viaPoints.find((v) => v.id === viaId);
     if (current && current.seq !== newSeq) {
+      renumbered = true;
       useTrip.setState((st) => ({
         viaPoints: st.viaPoints.map((v) => (v.id === viaId ? { ...v, seq: newSeq } : v)),
       }));
       updates.push(Promise.resolve(db.from("via_points").update({ seq: newSeq }).eq("id", viaId)));
     }
   });
+  // the setState calls above bypass the store's mutations, so kick the
+  // recompute explicitly — the Realtime echo won't (values already match)
+  if (renumbered) useTrip.getState().refreshRoutes();
   await Promise.all(updates);
 }

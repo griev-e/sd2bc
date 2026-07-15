@@ -26,6 +26,52 @@ export function routeCacheKey(points: LngLat[]): string {
 const memCache = new Map<string, OsrmRoute>();
 const inflight = new Map<string, Promise<OsrmRoute>>();
 
+interface RouteCacheRow {
+  key: string;
+  geometry: LngLat[];
+  legs: OsrmLeg[];
+  distance_m: number | string;
+  duration_s: number | string;
+}
+
+function rowToRoute(row: RouteCacheRow): OsrmRoute {
+  return {
+    coordinates: row.geometry,
+    legs: row.legs,
+    distance: Number(row.distance_m),
+    duration: Number(row.duration_s),
+  };
+}
+
+/**
+ * Warm the in-memory cache for many routes with ONE Supabase read instead of
+ * one per day — the difference between a single round trip and a dozen when
+ * the app cold-starts. Best effort: on any failure fetchRoute() falls back to
+ * its own per-route lookup.
+ */
+export async function primeRouteCache(pointLists: LngLat[][]): Promise<void> {
+  const keys = [
+    ...new Set(
+      pointLists
+        .filter((points) => points.length >= 2)
+        .map(routeCacheKey)
+        .filter((k) => !memCache.has(k)),
+    ),
+  ];
+  if (keys.length < 2) return; // a lone lookup is no cheaper batched
+  try {
+    const { data } = await supabase()
+      .from("route_cache")
+      .select("key, geometry, legs, distance_m, duration_s")
+      .in("key", keys);
+    for (const row of (data ?? []) as RouteCacheRow[]) {
+      memCache.set(row.key, rowToRoute(row));
+    }
+  } catch {
+    // ignore — per-route lookups still work
+  }
+}
+
 /**
  * Route through an ordered list of [lng, lat] points.
  * Cache order: memory → Supabase route_cache → OSRM public demo server.
@@ -46,12 +92,7 @@ export async function fetchRoute(points: LngLat[]): Promise<OsrmRoute> {
       .maybeSingle();
 
     if (data) {
-      const route: OsrmRoute = {
-        coordinates: data.geometry as LngLat[],
-        legs: data.legs as OsrmLeg[],
-        distance: Number(data.distance_m),
-        duration: Number(data.duration_s),
-      };
+      const route = rowToRoute({ key, ...data } as RouteCacheRow);
       memCache.set(key, route);
       return route;
     }
