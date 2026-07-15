@@ -23,6 +23,32 @@ const KIND_FOR_CATEGORY: Record<SuggestionCategory, StopKind> = {
   beach: "beach",
 };
 
+const TYPE_LABEL: Record<string, string> = {
+  museum: "Museum",
+  aquarium: "Aquarium",
+  zoo: "Zoo",
+  camp_site: "Campground",
+  guest_house: "Guest house",
+  motel: "Motel",
+  hotel: "Hotel",
+};
+
+function titleCase(s: string): string {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** One-line descriptor pulled from OSM tags: cuisine, stars, type, or brand. */
+function detailFor(s: Suggestion): string | null {
+  const t = s.tags;
+  if (t.cuisine) return t.cuisine.split(";").slice(0, 2).map(titleCase).join(" · ");
+  const stars = parseInt(t.stars ?? "", 10);
+  if (stars > 0) return "★".repeat(Math.min(stars, 5));
+  const type = TYPE_LABEL[t.tourism ?? ""];
+  if (type) return type;
+  if (t.brand) return t.brand;
+  return null;
+}
+
 export default function SuggestSheet({
   dayId,
   open,
@@ -137,7 +163,7 @@ function Results({
           ))}
         </div>
         <p className="mt-3 text-center text-[11px] text-fg-faint">
-          Asking OpenStreetMap — usually a few seconds, sometimes ~20.
+          Asking OpenStreetMap — usually a few seconds, sometimes ~30.
         </p>
       </div>
     );
@@ -167,8 +193,18 @@ function Results({
                 <StopKindIcon kind={KIND_FOR_CATEGORY[s.category]} size={22} />
               </div>
               <p className="line-clamp-2 text-sm font-semibold leading-tight tracking-tight">
+                {s.notable && (
+                  <span title="Has a Wikipedia entry" className="mr-1">
+                    ⭐
+                  </span>
+                )}
                 {s.name}
               </p>
+              {detailFor(s) && (
+                <p className="mt-0.5 line-clamp-1 text-[11px] font-medium text-fg-muted">
+                  {detailFor(s)}
+                </p>
+              )}
               <p className="tnum mb-2.5 mt-1 text-[11px] text-fg-muted">
                 {fmtMiles(s.offRouteM)} off route
                 {s.detourS > 90 && ` · +${fmtDuration(s.detourS)}`}
