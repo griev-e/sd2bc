@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface SheetProps {
@@ -41,6 +41,30 @@ function unlockBodyScroll() {
   window.scrollTo(0, savedScrollY);
 }
 
+// The iOS keyboard overlays the layout viewport instead of resizing it, so a
+// bottom-anchored fixed sheet ends up underneath it (and dvh units don't move
+// either). visualViewport is the only honest report of the visible area —
+// track how much the keyboard covers and lift the sheet by that amount.
+function useKeyboardInset(active: boolean): number {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () =>
+      setInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      setInset(0);
+    };
+  }, [active]);
+  return inset;
+}
+
 /** iOS-style spring bottom sheet rendered above the tab bar. */
 export default function Sheet({ open, onClose, title, children, maxHeight = "82dvh" }: SheetProps) {
   useEffect(() => {
@@ -55,6 +79,8 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
     lockBodyScroll();
     return unlockBodyScroll;
   }, [open]);
+
+  const keyboardInset = useKeyboardInset(open);
 
   if (typeof document === "undefined") return null;
 
@@ -72,7 +98,15 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
           />
           <motion.div
             className="glass-strong fixed inset-x-0 bottom-0 z-50 mx-auto flex max-w-md flex-col rounded-t-3xl border-b-0"
-            style={{ maxHeight }}
+            style={{
+              // ride above the iOS keyboard, and never grow taller than the
+              // strip that's still visible over it (100dvh ignores keyboards)
+              bottom: keyboardInset,
+              maxHeight: keyboardInset
+                ? `min(${maxHeight}, calc(100dvh - ${keyboardInset + 12}px))`
+                : maxHeight,
+              transition: "bottom 0.25s ease-out",
+            }}
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
