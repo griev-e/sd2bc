@@ -8,11 +8,12 @@ import { IconSparkle, IconWave, IconX } from "@/components/Icons";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import Sheet from "@/components/Sheet";
+import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
 import { NOMINATIM_URL } from "@/lib/config";
 import { fmtDuration, fmtMiles } from "@/lib/format";
 import type { LngLat } from "@/lib/geo";
-import { useTrip } from "@/lib/store";
+import { stopsForDay, useTrip } from "@/lib/store";
 import { useWeather, weatherKind, WEATHER_LABEL } from "@/lib/weather";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
@@ -43,9 +44,15 @@ export default function MapPage() {
 
   const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
   const selectedStop = stops.find((s) => s.id === selectedStopId) ?? null;
-  const stopWeather = useWeather((s) =>
-    selectedStop ? s.byDay[selectedStop.day_id] : undefined,
-  );
+  const byCluster = useWeather((s) => s.byCluster);
+  // The tapped stop's own cluster forecast — same reading as its map badge, so
+  // the card never describes a different place than the pin you touched.
+  const stopWeather = useMemo(() => {
+    if (!selectedStop) return undefined;
+    const dayStops = stopsForDay(stops, selectedStop.day_id);
+    const cluster = clusterStops(dayStops).find((c) => c.stopIds.includes(selectedStop.id));
+    return cluster ? byCluster[clusterKey(selectedStop.day_id, cluster.repStopId)] : undefined;
+  }, [selectedStop, stops, byCluster]);
 
   // segment arriving at the selected stop
   const incoming = useMemo(() => {
@@ -171,12 +178,12 @@ export default function MapPage() {
               {stopWeather && (
                 <p className="mt-1 flex items-center gap-1.5 text-xs text-fg-muted">
                   <WeatherIcon
-                    kind={weatherKind(stopWeather.code)}
+                    kind={weatherKind(stopWeather.dayCode)}
                     size={13}
                     strokeWidth={2}
                     className="text-accent"
                   />
-                  {WEATHER_LABEL[weatherKind(stopWeather.code)]}
+                  {WEATHER_LABEL[weatherKind(stopWeather.dayCode)]}
                   <span className="tnum">
                     {stopWeather.tMaxF}° / {stopWeather.tMinF}°
                   </span>
