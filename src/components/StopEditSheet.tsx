@@ -7,6 +7,7 @@ import { StopKindIcon } from "./CategoryIcon";
 import { IconLink, IconPin, IconX } from "./Icons";
 import { KIND_COLOR } from "@/lib/colors";
 import { fmtClock } from "@/lib/format";
+import { geocode, reverseGeocode, type GeocodeResult } from "@/lib/geocode";
 import { DAY_START_MIN, minutesToHHMM, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
 import type { Stop, StopKind } from "@/lib/types";
@@ -73,7 +74,6 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
   const anchorSeed = sched?.arrivalMin ?? DAY_START_MIN;
 
   const [name, setName] = useState(stop?.name ?? "");
-  const [address, setAddress] = useState(stop?.address ?? "");
   const [notes, setNotes] = useState(stop?.notes ?? "");
   const [lodgingUrl, setLodgingUrl] = useState(stop?.lodging_url ?? "");
   const [lodgingCost, setLodgingCost] = useState(
@@ -86,9 +86,6 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
     const patch: Partial<Stop> = {};
     if (name.trim() && name !== stop.name) patch.name = name.trim();
     if (notes !== stop.notes) patch.notes = notes;
-
-    const addr = address.trim();
-    if (addr !== (stop.address ?? "")) patch.address = addr || null;
 
     const url = lodgingUrl.trim();
     if (url !== (stop.lodging_url ?? "")) patch.lodging_url = url || null;
@@ -151,31 +148,7 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
         </div>
       </div>
 
-      <div>
-        <p className="eyebrow mb-2 px-0.5">Address</p>
-        <div className="flex items-center gap-2">
-          <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            onBlur={commitText}
-            placeholder="Street address or place"
-            autoCapitalize="words"
-            autoCorrect="off"
-            className="field flex-1"
-          />
-          <a
-            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-              address.trim() || `${stop.lat},${stop.lng}`,
-            )}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Open in maps"
-            className="btn-ghost pressable flex h-[46px] w-[46px] flex-shrink-0 items-center justify-center rounded-xl text-accent"
-          >
-            <IconPin size={17} />
-          </a>
-        </div>
-      </div>
+      <AddressField stop={stop} updateStop={updateStop} />
 
       {/* Planned stay — pushes the next stop's ETA, independent of any pinned
           time. The origin has no stay (you just leave). */}
@@ -332,6 +305,176 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
       >
         {confirmDelete ? "Tap again to confirm" : "Remove stop"}
       </button>
+    </div>
+  );
+}
+
+/**
+ * The stop's address, kept two-way in sync with its map pin.
+ *
+ * - **Type or paste** an address → debounced Nominatim search surfaces matching
+ *   places (a pasted hotel address brings up the hotel). Picking a result
+ *   writes the address *and* moves the stop's pin (lat/lng) to it.
+ * - **Blank field** → we reverse-geocode the pin and show where it sits, so the
+ *   address always reads consistent with the map. That fill stays local and is
+ *   never auto-persisted: a plain view mustn't write to the shared row or spam
+ *   the activity feed. It sticks only if you keep it (blur) or edit it.
+ */
+function AddressField({
+  stop,
+  updateStop,
+}: {
+  stop: Stop;
+  updateStop: (id: string, patch: Partial<Stop>) => Promise<void>;
+}) {
+  const [value, setValue] = useState(stop.address ?? "");
+  const [results, setResults] = useState<GeocodeResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
+  // Has the user actually engaged with the field? Guards against persisting a
+  // reverse-geocoded fill that they only ever looked at.
+  const touched = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // monotonic request id — a slow early response must never overwrite a later
+  // query's results (same guard as the add-stop search).
+  const requestSeq = useRef(0);
+
+  // Empty address? Read it back from wherever the pin currently sits. Only fires
+  // when there's nothing stored, so it re-derives at most once per open of an
+  // address-less stop — well within Nominatim etiquette.
+  useEffect(() => {
+    if ((stop.address ?? "") !== "" || touched.current) return;
+    let cancelled = false;
+    void reverseGeocode(stop.lat, stop.lng).then((label) => {
+      if (cancelled || !label || touched.current) return;
+      setValue((v) => (v === "" ? label : v));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [stop.address, stop.lat, stop.lng]);
+
+  // The sheet can dismiss while the input still has focus (blur never fires) —
+  // commit any pending text on unmount, and orphan any in-flight search.
+  const commitRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    commitRef.current = commit;
+  });
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+      requestSeq.current++;
+      commitRef.current();
+    },
+    [],
+  );
+
+  function onChange(v: string) {
+    touched.current = true;
+    setValue(v);
+    setOpen(true);
+    if (timer.current) clearTimeout(timer.current);
+    if (v.trim().length < 3) {
+      requestSeq.current++;
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    timer.current = setTimeout(async () => {
+      const id = ++requestSeq.current;
+      setSearching(true);
+      try {
+        const found = await geocode(v);
+        if (id === requestSeq.current) setResults(found);
+      } catch {
+        if (id === requestSeq.current) setResults([]);
+      } finally {
+        if (id === requestSeq.current) setSearching(false);
+      }
+    }, 450);
+  }
+
+  // Picking a result is the one path that moves the pin — address and location
+  // land together, so the two can never drift.
+  function select(r: GeocodeResult) {
+    touched.current = true;
+    requestSeq.current++; // drop any in-flight search
+    setValue(r.label);
+    setResults([]);
+    setOpen(false);
+    void updateStop(stop.id, { address: r.label, lat: r.lat, lng: r.lng });
+  }
+
+  // Commit typed text on blur, but never a mere reverse-geocoded fill.
+  function commit() {
+    if (!touched.current) return;
+    const next = value.trim();
+    if (next === (stop.address ?? "")) return;
+    void updateStop(stop.id, { address: next || null });
+  }
+
+  return (
+    <div>
+      <p className="eyebrow mb-2 px-0.5">Address</p>
+      <div className="flex items-center gap-2">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          onBlur={commit}
+          placeholder="Search or paste an address…"
+          autoCapitalize="words"
+          autoCorrect="off"
+          className="field flex-1"
+        />
+        <a
+          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            value.trim() || `${stop.lat},${stop.lng}`,
+          )}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open in maps"
+          className="btn-ghost pressable flex h-[46px] w-[46px] flex-shrink-0 items-center justify-center rounded-xl text-accent"
+        >
+          <IconPin size={17} />
+        </a>
+      </div>
+
+      {open && (searching || results.length > 0) && (
+        <div className="mt-2 space-y-1.5">
+          {searching && results.length === 0 && (
+            <div className="skeleton h-12 w-full" />
+          )}
+          {results.map((r, i) => (
+            <button
+              key={i}
+              type="button"
+              // pointer-down + preventDefault keeps the input from blurring
+              // (which would tear this list down before the tap registers).
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => select(r)}
+              className="card pressable flex w-full items-center gap-3 p-3 text-left"
+            >
+              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                <IconPin size={14} />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold">
+                  {r.name}
+                </span>
+                <span className="block truncate text-xs text-fg-muted">
+                  {r.detail}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <p className="mt-1.5 px-0.5 text-[11px] leading-4 text-fg-faint">
+        Pick a result to move the pin here. Left blank, it fills in from the
+        pin&rsquo;s location.
+      </p>
     </div>
   );
 }
