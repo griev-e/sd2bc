@@ -950,12 +950,13 @@ export const useTrip = create<TripState>((set, get) => {
     },
 
     refreshActivity: async () => {
-      const { data } = await supabase()
+      const { data, error } = await supabase()
         .from("activity_log")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(20);
-      set({ activity: (data as ActivityEntry[]) ?? [] });
+      // a failed refresh (offline) keeps the last list rather than blanking it
+      if (!error && data) set({ activity: data as ActivityEntry[] });
     },
   };
 });
