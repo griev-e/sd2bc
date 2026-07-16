@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { supabase } from "./supabase";
+import { localDateISO } from "./format";
 import { fetchRoute, primeRouteCache } from "./osrm";
 import type { LngLat } from "./geo";
 import type {
@@ -118,7 +119,9 @@ function sortDays(days: Day[]): Day[] {
 export function shiftDate(iso: string, n: number): string {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  // format from local parts — toISOString() converts to UTC, which walks the
+  // date back a day for devices at UTC+13/+14 even from a noon anchor
+  return localDateISO(d);
 }
 function sortStops(stops: Stop[]): Stop[] {
   return [...stops].sort((a, b) => a.seq - b.seq);
