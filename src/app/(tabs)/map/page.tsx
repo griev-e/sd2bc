@@ -10,9 +10,9 @@ import SuggestSheet from "@/components/SuggestSheet";
 import Sheet from "@/components/Sheet";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
-import { NOMINATIM_URL } from "@/lib/config";
 import { fmtDuration, fmtMiles } from "@/lib/format";
 import type { LngLat } from "@/lib/geo";
+import { reverseGeocode } from "@/lib/geocode";
 import { stopsForDay, useTrip } from "@/lib/store";
 import { useWeather, weatherKind, WEATHER_LABEL } from "@/lib/weather";
 
@@ -65,20 +65,11 @@ export default function MapPage() {
   }, [routes, selectedStop]);
 
   async function handleLongPress(lngLat: LngLat) {
-    let name = "Dropped pin";
-    try {
-      const res = await fetch(
-        `${NOMINATIM_URL}/reverse?format=jsonv2&lat=${lngLat[1]}&lon=${lngLat[0]}&zoom=14`,
-      );
-      if (res.ok) {
-        const json = await res.json();
-        name = (json.name as string) || (json.display_name as string)?.split(",")[0] || name;
-      }
-    } catch {
-      // keep default name
-    }
+    // zoom 14 ≈ neighborhood — a long-press wants "Moonstone Beach", not a
+    // house number
+    const place = await reverseGeocode(lngLat[1], lngLat[0], { zoom: 14 });
     setPinDayId(selectedDayId ?? orderedDays[0]?.id ?? null);
-    setPendingPin({ lngLat, name });
+    setPendingPin({ lngLat, name: place?.name || "Dropped pin" });
   }
 
   return (

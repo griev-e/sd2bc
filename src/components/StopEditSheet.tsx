@@ -22,7 +22,7 @@ const STAY_PRESETS: [number | null, string][] = [
 ];
 const PRESET_MINS = STAY_PRESETS.map(([m]) => m);
 
-export const KIND_META: { key: StopKind; label: string }[] = [
+const KIND_META: { key: StopKind; label: string }[] = [
   { key: "stop", label: "Stop" },
   { key: "scenic", label: "Scenic" },
   { key: "food", label: "Food" },
@@ -345,9 +345,9 @@ function AddressField({
   useEffect(() => {
     if ((stop.address ?? "") !== "" || touched.current) return;
     let cancelled = false;
-    void reverseGeocode(stop.lat, stop.lng).then((label) => {
-      if (cancelled || !label || touched.current) return;
-      setValue((v) => (v === "" ? label : v));
+    void reverseGeocode(stop.lat, stop.lng).then((r) => {
+      if (cancelled || !r || touched.current) return;
+      setValue((v) => (v === "" ? r.label : v));
     });
     return () => {
       cancelled = true;

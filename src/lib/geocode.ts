@@ -66,20 +66,34 @@ export async function geocode(query: string): Promise<GeocodeResult[]> {
   }));
 }
 
+export interface ReverseGeocodeResult {
+  /** Short place name — the venue/POI itself, else the first address segment. */
+  name: string;
+  /** Full formatted address (Nominatim display_name). */
+  label: string;
+}
+
 /**
- * Reverse-geocode a coordinate to a human address via Nominatim. Used to keep
- * a stop's address label in step with where its pin actually sits. Returns the
- * full display name, or null if nothing resolves.
+ * Reverse-geocode a coordinate via Nominatim. Used to keep a stop's address
+ * label in step with where its pin sits, and to name a long-pressed map point.
+ * Best effort: resolves null (never throws) when offline or nothing resolves.
+ * `zoom` trades address precision for locality (14 ≈ neighborhood).
  */
 export async function reverseGeocode(
   lat: number,
   lng: number,
-): Promise<string | null> {
-  const url = `${NOMINATIM_URL}/reverse?format=jsonv2&lat=${lat}&lon=${lng}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) return null;
-  const json = (await res.json()) as { display_name?: string };
-  return json.display_name && json.display_name.length > 0
-    ? json.display_name
-    : null;
+  opts?: { zoom?: number },
+): Promise<ReverseGeocodeResult | null> {
+  try {
+    const zoom = opts?.zoom != null ? `&zoom=${opts.zoom}` : "";
+    const url = `${NOMINATIM_URL}/reverse?format=jsonv2&lat=${lat}&lon=${lng}${zoom}`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { name?: string; display_name?: string };
+    const label = json.display_name;
+    if (!label) return null;
+    return { name: json.name || label.split(",")[0] || label, label };
+  } catch {
+    return null;
+  }
 }
