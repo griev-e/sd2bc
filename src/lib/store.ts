@@ -633,7 +633,7 @@ export const useTrip = create<TripState>((set, get) => {
           x.id === id ? { ...x, ...patch, updated_by: s.userId } : x,
         ),
       });
-      const geometry = ["day_id", "seq", "lat", "lng"].some((f) => f in patch);
+      const geometry = ROUTE_FIELDS.stops!.some((f) => f in patch);
       if (geometry) scheduleRoutes();
       const { error } = await supabase()
         .from("stops")
