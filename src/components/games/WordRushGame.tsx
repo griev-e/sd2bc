@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { IconTimer } from "@/components/Icons";
 import { WORD_CARDS, type WordCard } from "@/lib/gameData";
@@ -100,10 +101,15 @@ export default function WordRushGame() {
           <div className="card flex items-center gap-3 p-4">
             <IconTimer size={16} className="text-accent" />
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-fg/5">
-              <div
-                className="h-full rounded-full transition-[width] duration-300"
+              {/* linear tween a hair longer than the 250ms tick — the bar
+                  drains continuously instead of stepping (scaleX: transform
+                  only, no layout) */}
+              <motion.div
+                initial={false}
+                animate={{ scaleX: secondsLeft / ROUND_SECONDS }}
+                transition={{ duration: 0.3, ease: "linear" }}
+                className="h-full w-full origin-left rounded-full"
                 style={{
-                  width: `${(secondsLeft / ROUND_SECONDS) * 100}%`,
                   background:
                     secondsLeft <= 10 ? "var(--danger)" : "var(--accent-gradient)",
                 }}

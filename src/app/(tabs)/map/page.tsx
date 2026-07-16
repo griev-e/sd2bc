@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import CountdownPill from "@/components/CountdownPill";
@@ -13,6 +14,7 @@ import { dayColor, KIND_COLOR } from "@/lib/colors";
 import { fmtDuration, fmtMiles } from "@/lib/format";
 import type { LngLat } from "@/lib/geo";
 import { reverseGeocode } from "@/lib/geocode";
+import { FADE, riseIn } from "@/lib/motion";
 import { stopsForDay, useTrip } from "@/lib/store";
 import { useWeather, weatherKind, WEATHER_LABEL } from "@/lib/weather";
 
@@ -140,9 +142,15 @@ export default function MapPage() {
       </button>
 
       {/* selected stop card */}
+      <AnimatePresence>
       {selectedStop && !editOpen && (
-        <div className="absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+88px)] z-10 mx-auto max-w-md px-4">
-          <div className="glass-strong rise-in flex items-center gap-3 rounded-2xl p-4">
+        <motion.div
+          key={selectedStop.id}
+          {...riseIn()}
+          exit={{ opacity: 0, y: 8, transition: FADE }}
+          className="absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+88px)] z-10 mx-auto max-w-md px-4"
+        >
+          <div className="glass-strong flex items-center gap-3 rounded-2xl p-4">
             <div
               className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl"
               style={{
@@ -195,8 +203,9 @@ export default function MapPage() {
               <IconX size={12} />
             </button>
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       <StopEditSheet
         stop={selectedStop}

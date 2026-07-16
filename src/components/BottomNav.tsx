@@ -1,7 +1,9 @@
 "use client";
 
+import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SPRING } from "@/lib/motion";
 
 const TABS = [
   { href: "/map", label: "Map", icon: MapIcon },
@@ -23,13 +25,21 @@ export default function BottomNav() {
             <Link
               key={href}
               href={href}
-              className={`pressable flex min-h-[50px] min-w-[56px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors duration-200 ${
-                active ? "bg-accent-soft" : ""
-              }`}
+              className="pressable relative flex min-h-[50px] min-w-[56px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl"
             >
-              <Icon active={active} />
+              {/* one pill shared across tabs — layoutId slides it to the active one */}
+              {active && (
+                <motion.span
+                  layoutId="nav-active-tab"
+                  transition={SPRING}
+                  className="absolute inset-0 rounded-xl bg-accent-soft"
+                />
+              )}
+              <span className="relative">
+                <Icon active={active} />
+              </span>
               <span
-                className={`text-[9.5px] font-semibold tracking-wide ${
+                className={`relative text-[9.5px] font-semibold tracking-wide transition-colors duration-200 ${
                   active ? "text-accent" : "text-fg-faint"
                 }`}
               >

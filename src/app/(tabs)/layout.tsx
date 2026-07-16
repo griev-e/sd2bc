@@ -1,8 +1,10 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
+import { FADE } from "@/lib/motion";
 import { getSchedule } from "@/lib/schedule";
 import { supabase } from "@/lib/supabase";
 import { useTrip } from "@/lib/store";
@@ -76,9 +78,16 @@ export default function TabsLayout({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="mx-auto min-h-dvh max-w-md">
+    // opacity only — a transform here would become the containing block for
+    // the pages' position:fixed elements (map, FABs) and break their anchoring
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={FADE}
+      className="mx-auto min-h-dvh max-w-md"
+    >
       {children}
       <BottomNav />
-    </div>
+    </motion.div>
   );
 }

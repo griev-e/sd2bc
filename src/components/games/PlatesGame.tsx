@@ -1,8 +1,10 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { IconSearch } from "@/components/Icons";
 import { CA_PROVINCES, US_STATES } from "@/lib/gameData";
+import { SPRING } from "@/lib/motion";
 import { useTrip } from "@/lib/store";
 import { useGameEvents, usePlayers } from "./shared";
 
@@ -61,12 +63,13 @@ export default function PlatesGame() {
           <p className="eyebrow">spotted together</p>
         </div>
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-fg/5">
-          <div
-            className="h-full rounded-full transition-[width] duration-500"
-            style={{
-              width: `${(claims.size / total) * 100}%`,
-              background: "var(--accent-gradient)",
-            }}
+          {/* scaleX instead of width — transform-only, springs smoothly */}
+          <motion.div
+            initial={false}
+            animate={{ scaleX: claims.size / total }}
+            transition={SPRING}
+            className="h-full w-full origin-left rounded-full"
+            style={{ background: "var(--accent-gradient)" }}
           />
         </div>
       </section>

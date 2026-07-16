@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { FADE, SPRING_SHEET } from "@/lib/motion";
 
 interface SheetProps {
   open: boolean;
@@ -93,7 +94,7 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={FADE}
             onClick={onClose}
           />
           <motion.div
@@ -110,7 +111,7 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 320 }}
+            transition={SPRING_SHEET}
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.6 }}

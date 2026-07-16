@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import CountdownPill from "@/components/CountdownPill";
 import { ExpenseCategoryIcon } from "@/components/CategoryIcon";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/costs";
 import { fmtMiles, fmtMoney } from "@/lib/format";
 import { regionOf, type Region } from "@/lib/geo";
+import { riseIn, SPRING } from "@/lib/motion";
 import { useTrip } from "@/lib/store";
 import type { DayRoute, ExpenseCategory, Stop } from "@/lib/types";
 
@@ -149,7 +151,7 @@ export default function BudgetPage() {
 
       <div className="space-y-3.5 px-4 pt-4">
         {/* hero number */}
-        <section className="card relative overflow-hidden p-5">
+        <motion.section {...riseIn(0)} className="card relative overflow-hidden p-5">
           <div
             className="pointer-events-none absolute inset-0"
             style={{
@@ -178,10 +180,10 @@ export default function BudgetPage() {
               <span className="eyebrow mt-0.5 block">days</span>
             </span>
           </div>
-        </section>
+        </motion.section>
 
         {/* per-category breakdown — tap a row for the math + daily trend */}
-        <section className="card p-2">
+        <motion.section {...riseIn(1)} className="card p-2">
           {CATEGORIES.map((c) => {
             const color = EXPENSE_COLOR[c];
             const open = openCat === c;
@@ -208,39 +210,53 @@ export default function BudgetPage() {
                     </span>
                   </span>
                   <span className="tnum text-sm font-semibold">{fmtMoney(estimates[c])}</span>
-                  <IconChevronDown
-                    size={14}
-                    className={`flex-shrink-0 text-fg-faint transition-transform duration-200 ${
-                      open ? "rotate-180" : ""
-                    }`}
-                  />
+                  <motion.span
+                    animate={{ rotate: open ? 180 : 0 }}
+                    transition={SPRING}
+                    className="flex-shrink-0 text-fg-faint"
+                  >
+                    <IconChevronDown size={14} />
+                  </motion.span>
                 </button>
 
-                {open && (
-                  <div className="rise-in px-3 pb-3.5 pt-1">
-                    <p className="text-[11px] leading-4 text-fg-muted">{assumption[c]}</p>
-                    {c === "food" || c === "activities" ? (
-                      <RateEditor
-                        value={c === "food" ? seed.foodPerDay : seed.activitiesPerDay}
-                        travelers={travelers}
-                        days={orderedDays.length}
-                        color={color.fg}
-                        onChange={(v) =>
-                          trip &&
-                          void updateTrip(
-                            c === "food" ? { food_per_day: v } : { activities_per_day: v },
-                          )
-                        }
-                      />
-                    ) : (
-                      <TrendBars
-                        values={daily[c]}
-                        color={color.fg}
-                        average={estimates[c] / Math.max(1, orderedDays.length)}
-                      />
-                    )}
-                  </div>
-                )}
+                {/* height is normally off-limits, but 0 → auto is the one
+                    honest way to open an accordion; the row below slides
+                    instead of jumping */}
+                <AnimatePresence initial={false}>
+                  {open && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.25, ease: "easeOut" }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-3 pb-3.5 pt-1">
+                        <p className="text-[11px] leading-4 text-fg-muted">{assumption[c]}</p>
+                        {c === "food" || c === "activities" ? (
+                          <RateEditor
+                            value={c === "food" ? seed.foodPerDay : seed.activitiesPerDay}
+                            travelers={travelers}
+                            days={orderedDays.length}
+                            color={color.fg}
+                            onChange={(v) =>
+                              trip &&
+                              void updateTrip(
+                                c === "food" ? { food_per_day: v } : { activities_per_day: v },
+                              )
+                            }
+                          />
+                        ) : (
+                          <TrendBars
+                            values={daily[c]}
+                            color={color.fg}
+                            average={estimates[c] / Math.max(1, orderedDays.length)}
+                          />
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             );
           })}
@@ -248,10 +264,10 @@ export default function BudgetPage() {
             Seeded from 2026 regional averages for CA · OR · WA · BC. Fuel and
             lodging sharpen as the route and overnight stays take shape.
           </p>
-        </section>
+        </motion.section>
 
         {/* gas assumptions */}
-        <section className="card p-5">
+        <motion.section {...riseIn(2)} className="card p-5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold">Fuel model</p>
@@ -283,7 +299,7 @@ export default function BudgetPage() {
               </button>
             </div>
           </div>
-        </section>
+        </motion.section>
       </div>
     </div>
   );

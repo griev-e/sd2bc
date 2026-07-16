@@ -1,11 +1,13 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { IconPlus, IconX } from "@/components/Icons";
 import Sheet from "@/components/Sheet";
 import { displayName } from "@/lib/format";
+import { FADE, riseIn, SPRING } from "@/lib/motion";
 import { useTrip } from "@/lib/store";
 
 type AssignFilter = "all" | "me" | "partner" | "shared";
@@ -77,12 +79,13 @@ export default function PackingPage() {
           </div>
           <div className="mt-2.5 flex items-center gap-3">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fg/5">
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${packing.length ? (done / packing.length) * 100 : 0}%`,
-                  background: "var(--accent-gradient)",
-                }}
+              {/* scaleX instead of width — transform-only, springs smoothly */}
+              <motion.div
+                initial={false}
+                animate={{ scaleX: packing.length ? done / packing.length : 0 }}
+                transition={SPRING}
+                className="h-full w-full origin-left rounded-full"
+                style={{ background: "var(--accent-gradient)" }}
               />
             </div>
             <span className="mono text-xs font-semibold text-fg-muted">
@@ -105,11 +108,19 @@ export default function PackingPage() {
             <button
               key={key}
               onClick={() => setFilter(key)}
-              className={`pressable flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold ${
-                filter === key ? "btn-primary" : "glass text-fg-muted"
+              className={`pressable relative flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors duration-200 ${
+                filter === key ? "text-accent-contrast" : "glass text-fg-muted"
               }`}
             >
-              {label}
+              {/* one pill shared by the group — layoutId slides it to the pick */}
+              {filter === key && (
+                <motion.span
+                  layoutId="packing-filter-pill"
+                  transition={SPRING}
+                  className="btn-primary absolute inset-0 rounded-full"
+                />
+              )}
+              <span className="relative">{label}</span>
             </button>
           ))}
           <button
@@ -123,8 +134,16 @@ export default function PackingPage() {
         </div>
 
         <div className="space-y-3.5">
+          <AnimatePresence>
           {groups.map(([category, items], gi) => (
-            <section key={category} className="card p-4">
+            <motion.section
+              key={category}
+              layout="position"
+              {...riseIn(gi)}
+              transition={{ ...riseIn(gi).transition, layout: SPRING }}
+              exit={{ opacity: 0, transition: FADE }}
+              className="card p-4"
+            >
               <p className="eyebrow mb-2 flex items-center gap-1.5 px-1">
                 <span
                   className="h-1.5 w-1.5 rounded-full"
@@ -132,10 +151,18 @@ export default function PackingPage() {
                 />
                 {category}
               </p>
-              <div>
+              {/* popLayout: a deleted row pops out and fades while the rows
+                  below slide up — matches the optimistic delete in the store */}
+              <div className="relative">
+                <AnimatePresence initial={false} mode="popLayout">
                 {items.map((item) => (
-                  <label
+                  <motion.label
                     key={item.id}
+                    layout="position"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ ...FADE, layout: SPRING }}
                     className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-xl px-1.5 py-1 active:bg-fg/5"
                   >
                     <input
@@ -183,11 +210,13 @@ export default function PackingPage() {
                         </button>
                       </span>
                     )}
-                  </label>
+                  </motion.label>
                 ))}
+                </AnimatePresence>
               </div>
-            </section>
+            </motion.section>
           ))}
+          </AnimatePresence>
         </div>
       </div>
 
