@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { supabase } from "./supabase";
+import { localDateISO } from "./format";
 import { fetchRoute, primeRouteCache } from "./osrm";
 import type { LngLat } from "./geo";
 import type {
@@ -98,6 +99,9 @@ interface TripState {
 }
 
 let channel: ReturnType<ReturnType<typeof supabase>["channel"]> | null = null;
+// One shared init run — concurrent callers (StrictMode's double effect, a
+// double-tapped retry) must not each fetch and race to build the channel.
+let initPromise: Promise<void> | null = null;
 let routeTimer: ReturnType<typeof setTimeout> | null = null;
 let routeRun = 0;
 // Realtime never replays missed events, so a dropped channel (backgrounded
@@ -115,7 +119,9 @@ function sortDays(days: Day[]): Day[] {
 export function shiftDate(iso: string, n: number): string {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  // format from local parts — toISOString() converts to UTC, which walks the
+  // date back a day for devices at UTC+13/+14 even from a noon anchor
+  return localDateISO(d);
 }
 function sortStops(stops: Stop[]): Stop[] {
   return [...stops].sort((a, b) => a.seq - b.seq);
@@ -416,36 +422,51 @@ export const useTrip = create<TripState>((set, get) => {
     selectedDayId: null,
     selectedStopId: null,
 
-    init: async (userId) => {
-      if (get().loaded && get().userId === userId) return;
-      const db = supabase();
-      set({ userId, loadError: null });
+    init: (userId) => {
+      if (get().loaded && get().userId === userId) return Promise.resolve();
+      // Re-entrant calls (StrictMode's double effect, a double-tapped retry)
+      // join the run already in flight — racing two would double the initial
+      // fetch and leak a second Realtime channel with duplicate listeners.
+      if (initPromise) return initPromise;
 
-      try {
-        const rows = await fetchAllRows();
-        lastRefetchAt = Date.now();
-        set({ ...rows, loaded: true });
-        scheduleRoutes(50);
-      } catch (err) {
-        // Dead zone / flaky cell data: serve the last good load from this
-        // device instead of a blank app. The first reconnect refetches.
-        const snap = typeof window !== "undefined" ? loadSnapshot() : null;
-        if (snap) {
-          channelWasDown = true;
-          set({ ...snap, loaded: true });
-        } else {
-          set({ loadError: err instanceof Error ? err.message : "Couldn't load the trip" });
-          return;
+      const run = (async () => {
+        const db = supabase();
+        set({ userId, loadError: null });
+
+        try {
+          const rows = await fetchAllRows();
+          if (get().userId !== userId) return; // signed out while loading
+          lastRefetchAt = Date.now();
+          set({ ...rows, loaded: true });
+          scheduleRoutes(50);
+        } catch (err) {
+          if (get().userId !== userId) return;
+          // Dead zone / flaky cell data: serve the last good load from this
+          // device instead of a blank app. The first reconnect refetches.
+          const snap = typeof window !== "undefined" ? loadSnapshot() : null;
+          if (snap) {
+            channelWasDown = true;
+            set({ ...snap, loaded: true });
+          } else {
+            set({ loadError: err instanceof Error ? err.message : "Couldn't load the trip" });
+            return;
+          }
         }
-      }
 
-      if (!channel) {
+        if (channel) return;
+        // Claim the slot before any await so nothing else can build a second
+        // channel while this one is still attaching auth.
+        const ch = db.channel("coastline-sync");
+        channel = ch;
+
         // Realtime checks RLS with the subscriber's JWT — attach it explicitly
         // so postgres_changes events aren't silently filtered out.
         const { data: sessionData } = await db.auth.getSession();
         if (sessionData.session) {
           await db.realtime.setAuth(sessionData.session.access_token);
         }
+        if (channel !== ch) return; // torn down while auth was being attached
+
         // …and keep it fresh: the JWT rotates hourly, and a stale token makes
         // the socket silently drop events after expiry.
         authSub = db.auth.onAuthStateChange((evt, session) => {
@@ -454,7 +475,6 @@ export const useTrip = create<TripState>((set, get) => {
           }
         }).data.subscription;
 
-        channel = db.channel("coastline-sync");
         const tables: Tables[] = [
           "trips",
           "days",
@@ -465,7 +485,7 @@ export const useTrip = create<TripState>((set, get) => {
           "profiles",
         ];
         for (const table of tables) {
-          channel.on(
+          ch.on(
             "postgres_changes",
             { event: "*", schema: "public", table },
             (payload) => {
@@ -474,7 +494,10 @@ export const useTrip = create<TripState>((set, get) => {
             },
           );
         }
-        channel.subscribe((status) => {
+        ch.subscribe((status) => {
+          // teardown's removeChannel reports CLOSED asynchronously — a stale
+          // channel's status must not mark the *next* session's channel down
+          if (channel !== ch) return;
           if (status === "SUBSCRIBED") {
             if (channelWasDown) {
               channelWasDown = false;
@@ -497,10 +520,18 @@ export const useTrip = create<TripState>((set, get) => {
           }
         };
         document.addEventListener("visibilitychange", visHandler);
-      }
+      })();
+
+      initPromise = run.finally(() => {
+        initPromise = null;
+      });
+      return initPromise;
     },
 
     teardown: () => {
+      // an init still in flight will notice the cleared userId and bail; the
+      // next sign-in must start its own run, not join the doomed one
+      initPromise = null;
       if (channel) {
         supabase().removeChannel(channel);
         channel = null;
@@ -602,7 +633,7 @@ export const useTrip = create<TripState>((set, get) => {
           x.id === id ? { ...x, ...patch, updated_by: s.userId } : x,
         ),
       });
-      const geometry = ["day_id", "seq", "lat", "lng"].some((f) => f in patch);
+      const geometry = ROUTE_FIELDS.stops!.some((f) => f in patch);
       if (geometry) scheduleRoutes();
       const { error } = await supabase()
         .from("stops")
@@ -919,12 +950,13 @@ export const useTrip = create<TripState>((set, get) => {
     },
 
     refreshActivity: async () => {
-      const { data } = await supabase()
+      const { data, error } = await supabase()
         .from("activity_log")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(20);
-      set({ activity: (data as ActivityEntry[]) ?? [] });
+      // a failed refresh (offline) keeps the last list rather than blanking it
+      if (!error && data) set({ activity: data as ActivityEntry[] });
     },
   };
 });

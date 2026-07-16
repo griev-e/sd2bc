@@ -6,7 +6,7 @@ import type { Day, DayRoute, Stop } from "./types";
 /** Default departure clock for a day when nothing anchors it (9:00 AM). */
 export const DAY_START_MIN = 9 * 60;
 /** Stay added at a stop when the user hasn't picked a length (a pass-through). */
-export const DEFAULT_STAY_MIN = 0;
+const DEFAULT_STAY_MIN = 0;
 
 export interface StopSchedule {
   /** Estimated arrival, minutes since local midnight. */
