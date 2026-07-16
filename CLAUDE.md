@@ -85,6 +85,7 @@ src/
 | `clusters.ts` | Group nearby stops so forecasts aren't repeated. |
 | `shaping.ts` | Insert an invisible via/shaping point on a day's route. |
 | `theme.ts` | Light/dark/system preference, persisted per device. |
+| `suggestionPreview.ts` | Transient Zustand bridge: pins the current "suggest nearby" results on the map while `SuggestSheet` is open. |
 | `colors.ts` `emoji.ts` `format.ts` `geocode.ts` `gameData.ts` | Palette, day badges, formatters, Nominatim search, static game content. |
 
 ## Data model & the store
@@ -132,6 +133,13 @@ Conventions every mutation follows — **match these when adding one**:
   the recompute locally. It's superseded-run-safe via a `routeRun` counter — a
   newer edit invalidates an in-flight batch. Days route concurrently with a
   worker pool capped at 6 to be polite to the public OSRM server.
+
+The **Games tab** (`(tabs)/games`, `components/games/*`) is a lighter-weight
+extra: five backseat mini-games (Plates, I Spy, Chains, $$$ Cars, Word Rush)
+that share one append-only `game_events` table via `addGameEvent` /
+`deleteGameEvent`, following the same optimistic-write-then-Realtime-reconcile
+pattern as everything else. `GameId`/`GameEventKind` in `types.ts` and static
+content in `gameData.ts` are the source of truth for what each game shows.
 
 ## Free-service etiquette (do not regress this)
 
