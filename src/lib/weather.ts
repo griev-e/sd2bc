@@ -186,7 +186,9 @@ export const useWeather = create<WeatherState>((set) => ({
       "&temperature_unit=fahrenheit&timezone=auto" +
       `&start_date=${dates[0]}&end_date=${dates[dates.length - 1]}`;
 
-    fetch(url)
+    // hard timeout: `inflight` gates every future sync, so a fetch that never
+    // settles (mobile network handoff) must not wedge forecasts for good
+    fetch(url, { signal: AbortSignal.timeout(20_000) })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((json) => {
         const results = Array.isArray(json) ? json : [json];
