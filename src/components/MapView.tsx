@@ -171,6 +171,9 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       if (pressStart && Math.hypot(e.point.x - pressStart.x, e.point.y - pressStart.y) > 12) cancel();
     });
     map.on("touchend", cancel);
+    // touchcancel (not touchend) fires when iOS steals the touch for a system
+    // gesture — without this the timer still fires a phantom long-press
+    map.on("touchcancel", cancel);
     map.on("dragstart", cancel);
 
     const sm = stopMarkers.current;
@@ -216,6 +219,8 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   }, [routes, selectedDayId, mapReady, orderedDays, styleEpoch]);
 
   // ---- street ⇄ satellite ---------------------------------------------------
+  // the not-yet-fired style.load handler from the previous toggle, if any
+  const pendingStyleLoad = useRef<(() => void) | null>(null);
   const toggleStyle = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -227,10 +232,17 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     // Listen BEFORE calling setStyle — inline style objects (satellite) can
     // finish loading synchronously, so a later .once() would miss the event
     // and the route line would vanish until the map remounts.
-    map.once("style.load", () => {
+    // A rapid double-toggle can leave the previous once() still armed; both
+    // would fire on the final style.load and the stale one wins the layer
+    // creation with the wrong palette — drop it first.
+    if (pendingStyleLoad.current) map.off("style.load", pendingStyleLoad.current);
+    const onStyleLoad = () => {
+      pendingStyleLoad.current = null;
       addRouteLayers(map, next, dark);
       setStyleEpoch((e) => e + 1);
-    });
+    };
+    pendingStyleLoad.current = onStyleLoad;
+    map.once("style.load", onStyleLoad);
     map.setStyle(
       next === "satellite"
         ? (MAP_STYLE_SATELLITE as StyleSpecification)
