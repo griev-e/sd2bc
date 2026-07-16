@@ -2,12 +2,14 @@
 
 import maplibregl, { Map as MLMap, Marker, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_SATELLITE } from "@/lib/config";
 import { IconLayers } from "./Icons";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor } from "@/lib/colors";
 import { bboxOf, type LngLat } from "@/lib/geo";
+import { FADE, riseIn } from "@/lib/motion";
 import { SUGGESTION_CATEGORIES } from "@/lib/overpass";
 import { insertShapingPoint } from "@/lib/shaping";
 import { stopsForDay, useTrip } from "@/lib/store";
@@ -521,19 +523,25 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       </button>
 
       {/* shaping point delete pill */}
-      {selectedVia && (
-        <div className="absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+150px)] z-10 flex justify-center">
-          <button
-            onClick={() => {
-              void deleteViaPoint(selectedVia);
-              setSelectedVia(null);
-            }}
-            className="glass-strong pressable rise-in rounded-full px-4 py-2.5 text-sm font-medium text-danger"
+      <AnimatePresence>
+        {selectedVia && (
+          <motion.div
+            {...riseIn()}
+            exit={{ opacity: 0, y: 8, transition: FADE }}
+            className="absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+150px)] z-10 flex justify-center"
           >
-            Remove shaping point
-          </button>
-        </div>
-      )}
+            <button
+              onClick={() => {
+                void deleteViaPoint(selectedVia);
+                setSelectedVia(null);
+              }}
+              className="glass-strong pressable rounded-full px-4 py-2.5 text-sm font-medium text-danger"
+            >
+              Remove shaping point
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
+import MotionProvider from "@/components/MotionProvider";
 import RegisterSW from "@/components/RegisterSW";
 import "./globals.css";
 
@@ -60,7 +61,7 @@ export default function RootLayout({
           }}
         />
         <RegisterSW />
-        {children}
+        <MotionProvider>{children}</MotionProvider>
       </body>
     </html>
   );

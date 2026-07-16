@@ -85,6 +85,7 @@ src/
 | `clusters.ts` | Group nearby stops so forecasts aren't repeated. |
 | `shaping.ts` | Insert an invisible via/shaping point on a day's route. |
 | `theme.ts` | Light/dark/system preference, persisted per device. |
+| `motion.ts` | Shared Motion animation tokens (springs, fades, staggered rise). All structural animation (enter/exit, layout, sheets) uses Motion with these; micro feedback (`.pressable`, color transitions) stays CSS. `prefers-reduced-motion` is honored globally via `MotionProvider`. |
 | `suggestionPreview.ts` | Transient Zustand bridge: pins the current "suggest nearby" results on the map while `SuggestSheet` is open. |
 | `colors.ts` `emoji.ts` `format.ts` `geocode.ts` `gameData.ts` | Palette, day badges, formatters, Nominatim search, static game content. |
 

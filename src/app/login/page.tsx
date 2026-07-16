@@ -1,8 +1,10 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { IconWave } from "@/components/Icons";
+import { riseIn } from "@/lib/motion";
 import { supabase, usernameToEmail } from "@/lib/supabase";
 
 /**
@@ -72,6 +74,8 @@ export default function LoginPage() {
           </h1>
         </div>
 
+        {/* keyed by step — moving between picker / PIN / password rises in */}
+        <motion.div key={passwordMode ? "password" : who === null ? "who" : "pin"} {...riseIn()}>
         {passwordMode ? (
           <PasswordForm onBack={() => setPasswordMode(false)} />
         ) : who === null ? (
@@ -137,6 +141,7 @@ export default function LoginPage() {
             </button>
           </form>
         )}
+        </motion.div>
 
         {!passwordMode && (
           <button

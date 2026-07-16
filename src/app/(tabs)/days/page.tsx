@@ -16,6 +16,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import AddStopSheet from "@/components/AddStopSheet";
@@ -28,6 +29,7 @@ import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
+import { FADE, riseIn, SPRING } from "@/lib/motion";
 import { dayEmoji, NATURE_EMOJI } from "@/lib/emoji";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
 import { type StopSchedule, useSchedule } from "@/lib/schedule";
@@ -79,25 +81,29 @@ export default function DaysPage() {
       </header>
 
       <div className="space-y-3.5 px-4 pt-4">
-        {orderedDays.map((day, i) => (
-          <DayCard
-            key={day.id}
-            day={day}
-            index={i}
-            total={orderedDays.length}
-            route={routes[day.id]}
-            onEditStop={setEditStop}
-            onAddStop={() => setAddForDay(day.id)}
-            onSuggest={() => setSuggestForDay(day.id)}
-          />
-        ))}
+        <AnimatePresence>
+          {orderedDays.map((day, i) => (
+            <DayCard
+              key={day.id}
+              day={day}
+              index={i}
+              total={orderedDays.length}
+              route={routes[day.id]}
+              onEditStop={setEditStop}
+              onAddStop={() => setAddForDay(day.id)}
+              onSuggest={() => setSuggestForDay(day.id)}
+            />
+          ))}
+        </AnimatePresence>
 
-        <button
+        <motion.button
+          layout="position"
+          transition={{ layout: SPRING }}
           onClick={() => void addDay()}
           className="btn-ghost pressable flex h-12 w-full items-center justify-center gap-1.5 rounded-2xl text-sm font-semibold"
         >
           <IconPlus size={14} /> Add day {orderedDays.length + 1}
-        </button>
+        </motion.button>
       </div>
 
       <StopEditSheet stop={editStop} open={editStop !== null} onClose={() => setEditStop(null)} />
@@ -196,8 +202,20 @@ function DayCard({
     void reorderStops(day.id, arrayMove(ids, from, to));
   }
 
+  const enter = riseIn(index);
+
   return (
-    <section className="card p-4">
+    // layout="position" (not full layout): when a sibling day is added or
+    // removed this card slides instead of snapping, while its own size
+    // changes stay instant — full layout would scale-distort the text inside
+    <motion.section
+      layout="position"
+      initial={enter.initial}
+      animate={enter.animate}
+      exit={{ opacity: 0, transition: FADE }}
+      transition={{ ...enter.transition, layout: SPRING }}
+      className="card p-4"
+    >
       <div className="flex items-center gap-3">
         <button
           onClick={() => setEmojiOpen(true)}
@@ -314,18 +332,26 @@ function DayCard({
             }
           }}
           aria-label={`Remove day ${day.seq}`}
-          className={`pressable flex min-h-[38px] items-center justify-center rounded-xl text-xs font-semibold transition-all ${
+          className={`pressable flex min-h-[38px] items-center justify-center rounded-xl text-xs font-semibold transition-colors ${
             confirmDelete
               ? "bg-danger px-3 text-white"
               : "btn-ghost w-10 flex-shrink-0 !text-fg-faint"
           }`}
         >
-          {confirmDelete ? "Sure?" : <IconTrash size={14} />}
+          <motion.span
+            key={String(confirmDelete)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={FADE}
+            className="flex items-center"
+          >
+            {confirmDelete ? "Sure?" : <IconTrash size={14} />}
+          </motion.span>
         </button>
       </div>
 
       <DayEmojiSheet day={day} open={emojiOpen} onClose={() => setEmojiOpen(false)} />
-    </section>
+    </motion.section>
   );
 }
 

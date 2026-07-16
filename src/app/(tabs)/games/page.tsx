@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useState } from "react";
 import CountdownPill from "@/components/CountdownPill";
 import CarsGame from "@/components/games/CarsGame";
@@ -7,6 +8,7 @@ import FastFoodGame from "@/components/games/FastFoodGame";
 import PlatesGame from "@/components/games/PlatesGame";
 import RoadsideGame from "@/components/games/RoadsideGame";
 import WordRushGame from "@/components/games/WordRushGame";
+import { riseIn, SPRING } from "@/lib/motion";
 import type { GameId } from "@/lib/types";
 
 const GAMES: { id: GameId; label: string; blurb: string }[] = [
@@ -37,25 +39,36 @@ export default function GamesPage() {
               <button
                 key={g.id}
                 onClick={() => setActive(g.id)}
-                className={`pressable flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold ${
-                  active === g.id ? "btn-primary" : "border border-hairline text-fg-muted"
+                className={`pressable relative flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors duration-200 ${
+                  active === g.id
+                    ? "text-accent-contrast"
+                    : "border border-hairline text-fg-muted"
                 }`}
               >
-                {g.label}
+                {/* one pill shared by the row — layoutId slides it to the pick */}
+                {active === g.id && (
+                  <motion.span
+                    layoutId="game-chip-pill"
+                    transition={SPRING}
+                    className="btn-primary absolute inset-0 rounded-full"
+                  />
+                )}
+                <span className="relative">{g.label}</span>
               </button>
             ))}
           </div>
         </div>
       </header>
 
-      <div className="px-4 pt-4">
+      {/* keyed by game — switching remounts the panel with a quick rise */}
+      <motion.div key={active} {...riseIn()} className="px-4 pt-4">
         <p className="mb-3 px-1 text-[11px] text-fg-faint">{game.blurb} — synced live to both phones.</p>
         {active === "plates" && <PlatesGame />}
         {active === "roadside" && <RoadsideGame />}
         {active === "fastfood" && <FastFoodGame />}
         {active === "cars" && <CarsGame />}
         {active === "words" && <WordRushGame />}
-      </div>
+      </motion.div>
     </div>
   );
 }
