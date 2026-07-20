@@ -7,6 +7,7 @@ import { fetchRoute, primeRouteCache } from "./osrm";
 import type { LngLat } from "./geo";
 import type {
   ActivityEntry,
+  AnalysisInsight,
   Day,
   DayRoute,
   GameEvent,
@@ -15,6 +16,7 @@ import type {
   RouteSegment,
   Stop,
   Trip,
+  TripAnalysis,
   ViaPoint,
 } from "./types";
 
@@ -25,7 +27,8 @@ type Tables =
   | "packing_items"
   | "trips"
   | "game_events"
-  | "profiles";
+  | "profiles"
+  | "trip_analyses";
 
 interface TripState {
   loaded: boolean;
@@ -40,6 +43,7 @@ interface TripState {
   packing: PackingItem[];
   activity: ActivityEntry[];
   gameEvents: GameEvent[];
+  analyses: TripAnalysis[];
 
   routes: Record<string, DayRoute>;
   routesPending: boolean;
@@ -90,6 +94,10 @@ interface TripState {
   deletePackingItem: (id: string) => Promise<void>;
 
   refreshActivity: () => Promise<void>;
+
+  // AI trip analyzer cache
+  saveAnalysis: (key: string, model: string, insights: AnalysisInsight[]) => Promise<void>;
+  dismissInsight: (analysisId: string, insightId: string) => Promise<void>;
 
   // road games
   addGameEvent: (
@@ -173,7 +181,15 @@ export function routeGeometryChanged(
 const SNAPSHOT_KEY = "coastline-snapshot-v1";
 type Snapshot = Pick<
   TripState,
-  "profiles" | "trip" | "days" | "stops" | "viaPoints" | "packing" | "gameEvents" | "routes"
+  | "profiles"
+  | "trip"
+  | "days"
+  | "stops"
+  | "viaPoints"
+  | "packing"
+  | "gameEvents"
+  | "analyses"
+  | "routes"
 >;
 
 function loadSnapshot(): Snapshot | null {
@@ -181,7 +197,10 @@ function loadSnapshot(): Snapshot | null {
     const raw = localStorage.getItem(SNAPSHOT_KEY);
     if (!raw) return null;
     const snap = JSON.parse(raw) as Snapshot;
-    return Array.isArray(snap.days) && Array.isArray(snap.stops) ? snap : null;
+    if (!Array.isArray(snap.days) || !Array.isArray(snap.stops)) return null;
+    // snapshots written before the analyzer shipped have no analyses field
+    snap.analyses = Array.isArray(snap.analyses) ? snap.analyses : [];
+    return snap;
   } catch {
     return null;
   }
@@ -327,7 +346,7 @@ export const useTrip = create<TripState>((set, get) => {
   /** One full read of every shared table; throws if any query failed. */
   async function fetchAllRows(): Promise<Omit<Snapshot, "routes">> {
     const db = supabase();
-    const [profiles, trips, days, stops, vias, packing, games] = await Promise.all([
+    const [profiles, trips, days, stops, vias, packing, games, analyses] = await Promise.all([
       db.from("profiles").select("*"),
       db.from("trips").select("*").limit(1),
       db.from("days").select("*"),
@@ -335,8 +354,11 @@ export const useTrip = create<TripState>((set, get) => {
       db.from("via_points").select("*"),
       db.from("packing_items").select("*"),
       db.from("game_events").select("*").order("created_at", { ascending: true }),
+      db.from("trip_analyses").select("*").order("created_at", { ascending: true }),
     ]);
-    const failed = [profiles, trips, days, stops, vias, packing, games].find((r) => r.error);
+    const failed = [profiles, trips, days, stops, vias, packing, games, analyses].find(
+      (r) => r.error,
+    );
     if (failed?.error) throw new Error(failed.error.message);
     return {
       profiles: (profiles.data as Profile[]) ?? [],
@@ -346,6 +368,7 @@ export const useTrip = create<TripState>((set, get) => {
       viaPoints: (vias.data as ViaPoint[]) ?? [],
       packing: (packing.data as PackingItem[]) ?? [],
       gameEvents: (games.data as GameEvent[]) ?? [],
+      analyses: (analyses.data as TripAnalysis[]) ?? [],
     };
   }
 
@@ -395,6 +418,9 @@ export const useTrip = create<TripState>((set, get) => {
       case "game_events":
         set({ gameEvents: upsert(s.gameEvents) });
         break;
+      case "trip_analyses":
+        set({ analyses: upsert(s.analyses) });
+        break;
       case "profiles":
         set({ profiles: upsert(s.profiles) });
         break;
@@ -416,6 +442,7 @@ export const useTrip = create<TripState>((set, get) => {
     packing: [],
     activity: [],
     gameEvents: [],
+    analyses: [],
     routes: {},
     routesPending: false,
     routeError: null,
@@ -483,6 +510,7 @@ export const useTrip = create<TripState>((set, get) => {
           "packing_items",
           "game_events",
           "profiles",
+          "trip_analyses",
         ];
         for (const table of tables) {
           ch.on(
@@ -565,6 +593,7 @@ export const useTrip = create<TripState>((set, get) => {
         packing: [],
         activity: [],
         gameEvents: [],
+        analyses: [],
         routes: {},
         routesPending: false,
         routeError: null,
@@ -949,6 +978,68 @@ export const useTrip = create<TripState>((set, get) => {
       if (error && prev) set({ gameEvents: [...get().gameEvents, prev] });
     },
 
+    saveAnalysis: async (key, model, insights) => {
+      const s = get();
+      if (!s.trip) return;
+      const now = new Date().toISOString();
+      const row: TripAnalysis = {
+        id: crypto.randomUUID(),
+        trip_id: s.trip.id,
+        key,
+        model,
+        insights,
+        dismissed: [],
+        created_by: s.userId,
+        created_at: now,
+        updated_at: now,
+      };
+      const prev = s.analyses;
+      // one live analysis per trip — older rows are stale cache, drop them
+      set({ analyses: [row] });
+      // upsert on key: if the other phone raced us to the same trip state,
+      // last write wins and Realtime reconciles both to one row
+      const { error } = await supabase().from("trip_analyses").upsert(
+        {
+          id: row.id,
+          trip_id: row.trip_id,
+          key,
+          model,
+          insights,
+          dismissed: [],
+          created_by: s.userId,
+        },
+        { onConflict: "key" },
+      );
+      if (error) {
+        set({ analyses: prev });
+        return;
+      }
+      const staleIds = prev.filter((a) => a.key !== key).map((a) => a.id);
+      if (staleIds.length > 0) {
+        // best effort — a failed prune just leaves dead cache rows behind
+        void supabase().from("trip_analyses").delete().in("id", staleIds);
+      }
+    },
+
+    dismissInsight: async (analysisId, insightId) => {
+      const s = get();
+      const prev = s.analyses.find((a) => a.id === analysisId);
+      if (!prev || prev.dismissed.includes(insightId)) return;
+      const dismissed = [...prev.dismissed, insightId];
+      set({
+        analyses: s.analyses.map((a) => (a.id === analysisId ? { ...a, dismissed } : a)),
+      });
+      const { error } = await supabase()
+        .from("trip_analyses")
+        .update({ dismissed, updated_at: new Date().toISOString() })
+        .eq("id", analysisId);
+      if (error) {
+        set({
+          analyses: get().analyses.map((a) => (a.id === analysisId ? prev : a)),
+        });
+      }
+    },
+
     refreshActivity: async () => {
       const { data, error } = await supabase()
         .from("activity_log")
@@ -974,9 +1065,19 @@ if (typeof window !== "undefined") {
     if (!s.loaded) return;
     if (snapTimer) clearTimeout(snapTimer);
     snapTimer = setTimeout(() => {
-      const { profiles, trip, days, stops, viaPoints, packing, gameEvents, routes } =
+      const { profiles, trip, days, stops, viaPoints, packing, gameEvents, analyses, routes } =
         useTrip.getState();
-      const snap: Snapshot = { profiles, trip, days, stops, viaPoints, packing, gameEvents, routes };
+      const snap: Snapshot = {
+        profiles,
+        trip,
+        days,
+        stops,
+        viaPoints,
+        packing,
+        gameEvents,
+        analyses,
+        routes,
+      };
       try {
         localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
       } catch {

@@ -27,6 +27,12 @@ phones, progressive cost forecasting — built on entirely free, keyless service
   state, lodging/night, meals) that sharpens as the route and overnight stays
   take shape. Editable MPG and per-person/day rates, per-category breakdown
   with day-by-day trend bars.
+- **AI trip check** — a manual "Analyze trip" button on the Budget tab sends the
+  plan to Claude (server-side, `/api/analyze`) and returns dismissable insight
+  cards grouped by pacing / route / budget: over-packed or drive-heavy days,
+  smarter stop orderings, budget outliers, missing overnights, and long legs
+  with no food or fuel stop. Results are cached in Supabase keyed by a hash of
+  the trip state, so re-opens and the second phone never re-call the API.
 - **Packing** — pre-seeded shared checklist, assignment (me / her / shared),
   attribution dots, live sync.
 - **Realtime** — every table syncs between both phones via Supabase Realtime
@@ -54,10 +60,20 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key>
 The Supabase anon/publishable key is designed to ship in client bundles;
 all data access is enforced by Row Level Security (authenticated-only).
 
+Server-only (never `NEXT_PUBLIC_`) — required for the AI trip check:
+
+```
+ANTHROPIC_API_KEY=<Anthropic API key>
+```
+
+Without it the app runs fine; `/api/analyze` answers 503 and the Analyze
+button surfaces a "not configured" message.
+
 ## Supabase layout
 
 Tables: `profiles`, `trips`, `days`, `stops`, `via_points` (route shaping),
-`packing_items`, `route_cache`, `poi_cache`, `activity_log`.
+`packing_items`, `route_cache`, `poi_cache`, `activity_log`, `game_events`,
+`trip_analyses` (AI trip-check cache).
 All tables have RLS (authenticated role only — the app is a private two-person
 workspace). Realtime publication covers every shared table. Triggers maintain
 `updated_at` and write the activity feed. The `signup` edge function creates
@@ -73,3 +89,6 @@ Migrations live in the Supabase project (`coastline_schema`, `coastline_seed`,
   re-fetch. Route recomputes are debounced 500 ms.
 - Overpass results are cached 2 days in `poi_cache`; a daily pg_cron job purges stale `route_cache`/`poi_cache` rows.
 - Nominatim search is debounced 450 ms and only fires from explicit user input.
+- The AI trip check is manual-trigger only and cached in `trip_analyses` keyed
+  by a hash of the trip state — the same exact plan is never analyzed twice,
+  on either phone.

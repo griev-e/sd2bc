@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import CountdownPill from "@/components/CountdownPill";
 import { ExpenseCategoryIcon } from "@/components/CategoryIcon";
+import TripAnalyzer from "@/components/TripAnalyzer";
 import { IconChevronDown } from "@/components/Icons";
 import { EXPENSE_COLOR } from "@/lib/colors";
 import {
@@ -300,6 +301,11 @@ export default function BudgetPage() {
             </div>
           </div>
         </motion.section>
+
+        {/* AI trip check — manual analyzer over the same inputs as the forecast */}
+        <motion.div {...riseIn(3)}>
+          <TripAnalyzer estimates={{ ...estimates, totalMiles }} />
+        </motion.div>
       </div>
     </div>
   );
