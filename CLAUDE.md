@@ -64,6 +64,7 @@ src/
     api/
       overpass/route.ts   # hedged Overpass proxy (needs a real User-Agent)
       pin-login/route.ts  # shared-PIN → Supabase magic-link (uses secret key)
+      analyze/route.ts    # AI trip analyzer → Anthropic API (uses ANTHROPIC_API_KEY)
   components/              # UI: MapView, Sheet, *Sheet editors, BottomNav, Icons, games/
   lib/                    # all non-UI logic (see below)
 ```
@@ -84,6 +85,7 @@ src/
 | `weather.ts` | Open-Meteo forecasts per stop cluster (Zustand store). |
 | `clusters.ts` | Group nearby stops so forecasts aren't repeated. |
 | `shaping.ts` | Insert an invisible via/shaping point on a day's route. |
+| `analysis.ts` | AI trip analyzer client half: `analysisKey()` (cache key = hash of the itinerary + budget knobs) and `buildAnalysisPayload()` (the compact snapshot `/api/analyze` feeds to Claude). |
 | `theme.ts` | Light/dark/system preference, persisted per device. |
 | `motion.ts` | Shared Motion animation tokens (springs, fades, staggered rise). All structural animation (enter/exit, layout, sheets) uses Motion with these; micro feedback (`.pressable`, color transitions) stays CSS. `prefers-reduced-motion` is honored globally via `MotionProvider`. |
 | `suggestionPreview.ts` | Transient Zustand bridge: pins the current "suggest nearby" results on the map while `SuggestSheet` is open. |
@@ -93,7 +95,7 @@ src/
 
 The **store (`src/lib/store.ts`) is the single source of truth on the client.**
 Entities: `profiles`, `trip`, `days`, `stops`, `viaPoints`, `packing`,
-`gameEvents`, plus derived `routes` and shared UI selection
+`gameEvents`, `analyses`, plus derived `routes` and shared UI selection
 (`selectedDayId` / `selectedStopId`). `activity` is fetched on demand.
 
 Conventions every mutation follows — **match these when adding one**:
@@ -158,6 +160,13 @@ The whole app is designed to never hammer a free public endpoint:
 - **Open-Meteo** forecasts are cached ~30 min and requested once per stop
   cluster, not per stop.
 
+- **Anthropic** (the one keyed, paid service — used sparingly) powers the AI
+  trip check. It is **manual-trigger only** and every result is cached in
+  `trip_analyses`, keyed by `analysisKey()` — a hash of the exact trip state —
+  so re-opens and the second phone read the cache instead of re-calling.
+  `/api/analyze` is stateless; the *client* writes the cache row through the
+  authenticated Supabase client (RLS applies) and Realtime syncs it across.
+
 When adding an external call: cache it (memory + Supabase for anything shared),
 debounce user-driven calls, and prefer the existing keyless endpoints in
 `config.ts`.
@@ -187,6 +196,10 @@ and runs with **no `.env`**. Env vars override when present:
 - `PIN_CODE`, `SUPABASE_SECRET_KEY` (or legacy `SUPABASE_SERVICE_ROLE_KEY`) —
   server-only, required for PIN sign-in (`api/pin-login`). Never expose these to
   the client or hardcode them.
+- `ANTHROPIC_API_KEY` — server-only, required for the AI trip check
+  (`api/analyze`). Same rules: never `NEXT_PUBLIC_`, never in the client
+  bundle. Without it the route answers 503 and the rest of the app is
+  unaffected.
 
 ## Conventions & style
 

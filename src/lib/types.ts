@@ -128,6 +128,34 @@ export interface DayRoute {
   durationS: number;
 }
 
+export type InsightCategory = "pacing" | "budget" | "route";
+
+/** One finding from the AI trip analyzer. */
+export interface AnalysisInsight {
+  /** Stable within its analysis row — dismissals key on this. */
+  id: string;
+  category: InsightCategory;
+  severity: "info" | "warn";
+  title: string;
+  detail: string;
+  /** Day the insight points at (Day.seq), or null for trip-wide findings. */
+  day_seq: number | null;
+}
+
+/** Cached AI analysis of one exact trip state (keyed by analysisKey()). */
+export interface TripAnalysis {
+  id: string;
+  trip_id: string;
+  key: string;
+  model: string;
+  insights: AnalysisInsight[];
+  /** Insight ids either traveler dismissed — shared, last-write-wins. */
+  dismissed: string[];
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type GameId = "plates" | "cars" | "roadside" | "words" | "fastfood";
 export type GameEventKind = "claim" | "entry" | "count" | "score";
 
