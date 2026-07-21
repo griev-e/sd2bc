@@ -61,7 +61,7 @@ export default function RoadsideGame() {
                     ? {
                         borderColor: "transparent",
                         background: color ?? "var(--fg-faint)",
-                        color: "#fff",
+                        color: "var(--on-strong)",
                       }
                     : { borderColor: "var(--hairline)", color: "var(--fg-muted)" }
                 }

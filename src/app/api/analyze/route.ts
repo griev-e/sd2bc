@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
+import { verifyTraveler } from "@/lib/server/auth";
 import type { AnalysisInsight, InsightCategory } from "@/lib/types";
 
 /**
@@ -26,13 +27,14 @@ const INSIGHTS_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          category: { type: "string", enum: ["pacing", "budget", "route"] },
+          category: { type: "string", enum: ["pacing", "budget", "route", "weather"] },
           severity: { type: "string", enum: ["info", "warn"] },
           title: { type: "string" },
           detail: { type: "string" },
           day_seq: { type: ["integer", "null"] },
+          suggested_order: { type: ["array", "null"], items: { type: "string" } },
         },
-        required: ["category", "severity", "title", "detail", "day_seq"],
+        required: ["category", "severity", "title", "detail", "day_seq", "suggested_order"],
         additionalProperties: false,
       },
     },
@@ -48,8 +50,9 @@ Return concrete, actionable findings a couple planning on their phones can act o
 - route: stop orderings within a day that backtrack or interleave badly (suggest the better order by name), and long legs (roughly 2.5+ hours) with no food or fuel stop between them
 - budget: nights whose estimated or entered cost stands out against the rest of the forecast, and any day sitting far above the trip's per-day average
 - pacing: days that end without an overnight stop marked — the budget can't count that night and the day has no anchor
+- weather: days whose forecast (the day's "weather" field, when present) clashes with the plan — rain or storms on a beach/scenic-heavy day, extreme heat on a long outdoor day. Only use the forecast given; days without one get no weather findings.
 
-Rules: cite day numbers and stop names from the snapshot only — never invent places. Each finding stands alone with a short imperative title and one or two sentences of detail that mention the relevant numbers (miles, hours, dollars). Set day_seq to the day a finding points at, or null for trip-wide findings. Use severity "warn" only when the finding likely breaks the day (unworkable driving, missing overnight, big budget surprise). Return at most 8 findings, best first. If the plan genuinely looks solid in an area, say nothing about it — an empty list is a valid answer.`;
+Rules: cite day numbers and stop names from the snapshot only — never invent places. Each finding stands alone with a short imperative title and one or two sentences of detail that mention the relevant numbers (miles, hours, dollars, degrees). Set day_seq to the day a finding points at, or null for trip-wide findings. When (and only when) a route finding recommends reordering one day's stops, set suggested_order to that day's complete stop list — every stop name exactly as given, each exactly once — in the recommended order; otherwise set it to null. Use severity "warn" only when the finding likely breaks the day (unworkable driving, missing overnight, big budget surprise). Return at most 8 findings, best first. If the plan genuinely looks solid in an area, say nothing about it — an empty list is a valid answer.`;
 
 /** Runtime guard for the model's output — structured outputs should make
  *  this always pass, but a refusal or truncation must not crash the route. */
@@ -57,13 +60,21 @@ function normalizeInsights(raw: unknown): AnalysisInsight[] | null {
   if (!raw || typeof raw !== "object") return null;
   const list = (raw as { insights?: unknown }).insights;
   if (!Array.isArray(list)) return null;
-  const cats: InsightCategory[] = ["pacing", "budget", "route"];
+  const cats: InsightCategory[] = ["pacing", "budget", "route", "weather"];
   const out: AnalysisInsight[] = [];
   for (const item of list.slice(0, 12)) {
     if (!item || typeof item !== "object") continue;
     const i = item as Record<string, unknown>;
     if (!cats.includes(i.category as InsightCategory)) continue;
     if (typeof i.title !== "string" || typeof i.detail !== "string") continue;
+    // a usable reorder is a modest list of plain strings — anything else → null
+    const order =
+      Array.isArray(i.suggested_order) &&
+      i.suggested_order.length > 0 &&
+      i.suggested_order.length <= 20 &&
+      i.suggested_order.every((n) => typeof n === "string" && n.length <= 120)
+        ? (i.suggested_order as string[])
+        : null;
     out.push({
       id: `i-${out.length}`,
       category: i.category as InsightCategory,
@@ -71,12 +82,19 @@ function normalizeInsights(raw: unknown): AnalysisInsight[] | null {
       title: i.title.slice(0, 120),
       detail: i.detail.slice(0, 500),
       day_seq: typeof i.day_seq === "number" ? i.day_seq : null,
+      suggested_order: order,
     });
   }
   return out;
 }
 
 export async function POST(req: NextRequest) {
+  // Travelers only — this route spends real Anthropic tokens.
+  const auth = await verifyTraveler(req);
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

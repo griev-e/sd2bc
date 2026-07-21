@@ -128,7 +128,7 @@ export interface DayRoute {
   durationS: number;
 }
 
-export type InsightCategory = "pacing" | "budget" | "route";
+export type InsightCategory = "pacing" | "budget" | "route" | "weather";
 
 /** One finding from the AI trip analyzer. */
 export interface AnalysisInsight {
@@ -140,6 +140,12 @@ export interface AnalysisInsight {
   detail: string;
   /** Day the insight points at (Day.seq), or null for trip-wide findings. */
   day_seq: number | null;
+  /**
+   * For route-order findings: the day's stops (by exact name) in the order
+   * the model recommends — powers the one-tap "apply this order" action.
+   * Absent on rows cached before this field existed.
+   */
+  suggested_order?: string[] | null;
 }
 
 /** Cached AI analysis of one exact trip state (keyed by analysisKey()). */

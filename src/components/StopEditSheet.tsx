@@ -6,7 +6,7 @@ import AttributionDot from "./Attribution";
 import { StopKindIcon } from "./CategoryIcon";
 import { IconLink, IconPin, IconX } from "./Icons";
 import { KIND_COLOR } from "@/lib/colors";
-import { fmtClock } from "@/lib/format";
+import { fmtClock, safeHttpUrl } from "@/lib/format";
 import { geocode, reverseGeocode, type GeocodeResult } from "@/lib/geocode";
 import { DAY_START_MIN, minutesToHHMM, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
@@ -108,6 +108,8 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
   if (!stop) return null;
 
   const isLodging = stop.is_overnight || stop.kind === "lodging";
+  // pasted text only becomes a tappable link once it's a real http(s) URL
+  const bookingHref = safeHttpUrl(stop.lodging_url);
 
   return (
     <div className="space-y-5">
@@ -262,9 +264,9 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
                 autoCorrect="off"
                 className="field flex-1"
               />
-              {stop.lodging_url && (
+              {bookingHref && (
                 <a
-                  href={stop.lodging_url}
+                  href={bookingHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Open booking link"

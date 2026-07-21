@@ -19,6 +19,17 @@ const TRAVELERS: Record<string, string> = {
   hailey: "hlyphn@coastline.app",
 };
 
+/*
+  Brute-force guard. The flat 600ms delay below slows a *serial* guesser, but
+  serverless requests run in parallel, so a short numeric PIN also needs a
+  hard budget: after this many failures inside the window, every attempt is
+  refused until the window rolls over. Attempts live in the pin_attempts
+  table (RLS on, no policies — only this route's service key touches it).
+*/
+const MAX_FAILURES_PER_WINDOW = 10;
+const WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const PRUNE_AFTER_MS = 24 * 60 * 60 * 1000;
+
 export function pinMatches(given: string, expected: string): boolean {
   // constant-time compare over equal-length buffers
   const a = Buffer.from(given.padEnd(64, "\0").slice(0, 64));
@@ -47,15 +58,48 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // flat 600ms on every attempt keeps guessing slow without a rate-limit store
-  await new Promise((r) => setTimeout(r, 600));
-  if (!pinMatches(pin.trim(), expected.trim())) {
-    return NextResponse.json({ error: "Wrong PIN" }, { status: 401 });
-  }
-
   const admin = createClient(SUPABASE_URL, secret, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  // Refuse outright while the failure budget is spent. Fails OPEN on a DB
+  // hiccup — locking the two travelers out over a blip is the worse failure.
+  try {
+    const since = new Date(Date.now() - WINDOW_MS).toISOString();
+    const { count } = await admin
+      .from("pin_attempts")
+      .select("*", { count: "exact", head: true })
+      .eq("success", false)
+      .gte("created_at", since);
+    if ((count ?? 0) >= MAX_FAILURES_PER_WINDOW) {
+      return NextResponse.json(
+        { error: "Too many attempts — try again in an hour, or use a password." },
+        { status: 429 },
+      );
+    }
+  } catch {
+    // fall through
+  }
+
+  // flat 600ms on every attempt keeps serial guessing slow
+  await new Promise((r) => setTimeout(r, 600));
+  const ok = pinMatches(pin.trim(), expected.trim());
+
+  // Record the attempt (and opportunistically prune old rows) before
+  // answering — best effort, a logging failure must not block sign-in.
+  try {
+    await admin.from("pin_attempts").insert({ success: ok });
+    await admin
+      .from("pin_attempts")
+      .delete()
+      .lt("created_at", new Date(Date.now() - PRUNE_AFTER_MS).toISOString());
+  } catch {
+    // ignore
+  }
+
+  if (!ok) {
+    return NextResponse.json({ error: "Wrong PIN" }, { status: 401 });
+  }
   const { data, error } = await admin.auth.admin.generateLink({
     type: "magiclink",
     email: TRAVELERS[user],

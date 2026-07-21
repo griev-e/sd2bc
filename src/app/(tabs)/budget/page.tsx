@@ -7,22 +7,12 @@ import { ExpenseCategoryIcon } from "@/components/CategoryIcon";
 import TripAnalyzer from "@/components/TripAnalyzer";
 import { IconChevronDown } from "@/components/Icons";
 import { EXPENSE_COLOR } from "@/lib/colors";
-import {
-  ACTIVITIES_PER_PERSON_DAY,
-  BIG_CITY_PATTERN,
-  CATEGORY_LABEL,
-  CATEGORIES,
-  FOOD_PER_PERSON_DAY,
-  GAS_PRICE_USD_PER_GAL,
-  nightCost,
-  seedEstimate,
-  type SeedInputs,
-} from "@/lib/costs";
+import { computeBudget, M_PER_MI } from "@/lib/budget";
+import { CATEGORY_LABEL, CATEGORIES, GAS_PRICE_USD_PER_GAL } from "@/lib/costs";
 import { fmtMiles, fmtMoney } from "@/lib/format";
-import { regionOf, type Region } from "@/lib/geo";
 import { riseIn, SPRING } from "@/lib/motion";
-import { useTrip } from "@/lib/store";
-import type { DayRoute, ExpenseCategory, Stop } from "@/lib/types";
+import { useOrderedDays, useTrip } from "@/lib/store";
+import type { ExpenseCategory } from "@/lib/types";
 
 export default function BudgetPage() {
   const trip = useTrip((s) => s.trip);
@@ -33,83 +23,16 @@ export default function BudgetPage() {
 
   const [openCat, setOpenCat] = useState<ExpenseCategory | null>(null);
 
-  const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
+  const orderedDays = useOrderedDays();
   const mpg = trip?.mpg ?? 28;
   const travelers = trip?.travelers ?? 2;
 
-  const seed: SeedInputs = useMemo(() => {
-    const milesByRegion: Record<Region, number> = { CA: 0, OR: 0, WA: 0, BC: 0 };
-    const stopById = new Map(stops.map((s) => [s.id, s]));
-    for (const r of Object.values(routes)) {
-      for (const seg of r.segments) {
-        const from = stopById.get(seg.fromStopId);
-        if (!from) continue;
-        milesByRegion[regionOf(from.lat)] += seg.distanceM / 1609.344;
-      }
-    }
-    const nights = stops
-      .filter((s) => s.is_overnight)
-      .map((s) => ({
-        region: regionOf(s.lat),
-        bigCity: BIG_CITY_PATTERN.test(s.name),
-        free: s.lodging_free,
-        cost: s.lodging_cost,
-      }));
-    return {
-      milesByRegion,
-      mpg,
-      travelers,
-      totalDays: Math.max(1, days.length),
-      nights,
-      foodPerDay: trip?.food_per_day ?? FOOD_PER_PERSON_DAY,
-      activitiesPerDay: trip?.activities_per_day ?? ACTIVITIES_PER_PERSON_DAY,
-    };
-  }, [routes, stops, mpg, travelers, days.length, trip?.food_per_day, trip?.activities_per_day]);
-
-  const estimates = useMemo(
-    () =>
-      Object.fromEntries(CATEGORIES.map((c) => [c, seedEstimate(c, seed)])) as Record<
-        ExpenseCategory,
-        number
-      >,
-    [seed],
+  // The whole forecast comes from one shared function — the AI trip check
+  // reads the exact same numbers, so the two can never disagree.
+  const { seed, estimates, total, totalMiles, daily } = useMemo(
+    () => computeBudget(trip, days, stops, routes),
+    [trip, days, stops, routes],
   );
-  const total = CATEGORIES.reduce((s, c) => s + estimates[c], 0);
-  const totalMiles = Object.values(seed.milesByRegion).reduce((a, b) => a + b, 0);
-
-  // estimated spend per category per day — powers the trend bars
-  const daily = useMemo(() => {
-    const stopById = new Map(stops.map((s) => [s.id, s]));
-    const byCat = {} as Record<ExpenseCategory, number[]>;
-    for (const c of CATEGORIES) byCat[c] = [];
-    for (const day of orderedDays) {
-      const route: DayRoute | undefined = routes[day.id];
-      let gas = 0;
-      for (const seg of route?.segments ?? []) {
-        const from = stopById.get(seg.fromStopId);
-        if (!from) continue;
-        gas +=
-          ((seg.distanceM / 1609.344) * GAS_PRICE_USD_PER_GAL[regionOf(from.lat)]) /
-          Math.max(1, mpg);
-      }
-      const overnight: Stop | undefined = stops.find(
-        (s) => s.day_id === day.id && s.is_overnight,
-      );
-      const lodging = overnight
-        ? nightCost({
-            region: regionOf(overnight.lat),
-            bigCity: BIG_CITY_PATTERN.test(overnight.name),
-            free: overnight.lodging_free,
-            cost: overnight.lodging_cost,
-          })
-        : 0;
-      byCat.gas.push(gas);
-      byCat.lodging.push(lodging);
-      byCat.food.push(seed.foodPerDay * travelers);
-      byCat.activities.push(seed.activitiesPerDay * travelers);
-    }
-    return byCat;
-  }, [orderedDays, routes, stops, mpg, travelers, seed.foodPerDay, seed.activitiesPerDay]);
 
   // one-line "how it's figured" per category
   const assumption: Record<ExpenseCategory, string> = useMemo(() => {
@@ -123,7 +46,7 @@ export default function BudgetPage() {
     return {
       gas:
         totalMiles > 0
-          ? `${fmtMiles(totalMiles * 1609.344)} at ${mpg} mpg · avg ${fmtMoney(avgGal)}/gal`
+          ? `${fmtMiles(totalMiles * M_PER_MI)} at ${mpg} mpg · avg ${fmtMoney(avgGal)}/gal`
           : "No route yet — add stops and this fills in from real miles",
       lodging:
         nights > 0
@@ -166,7 +89,7 @@ export default function BudgetPage() {
           <div className="stat-strip mt-5">
             <span>
               <span className="mono block text-[13px] font-semibold">
-                {totalMiles > 0 ? fmtMiles(totalMiles * 1609.344) : "—"}
+                {totalMiles > 0 ? fmtMiles(totalMiles * M_PER_MI) : "—"}
               </span>
               <span className="eyebrow mt-0.5 block">route</span>
             </span>
@@ -304,7 +227,7 @@ export default function BudgetPage() {
 
         {/* AI trip check — manual analyzer over the same inputs as the forecast */}
         <motion.div {...riseIn(3)}>
-          <TripAnalyzer estimates={{ ...estimates, totalMiles }} />
+          <TripAnalyzer />
         </motion.div>
       </div>
     </div>

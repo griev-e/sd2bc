@@ -41,6 +41,9 @@
   --green-soft: rgba(22, 163, 74, 0.1);
   --slate: #5b6b7c;
   --slate-soft: rgba(91, 107, 124, 0.11);
+  /* text/icon ink on top of a saturated fill (claim chips, colored pills) —
+     deliberately theme-invariant, unlike --accent-contrast */
+  --on-strong: #ffffff;
 }
 
 :root[data-theme="dark"] {

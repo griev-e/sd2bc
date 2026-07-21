@@ -23,6 +23,16 @@ export const KIND_COLOR: Record<StopKind, { fg: string; bg: string }> = {
   lodging: { fg: "var(--indigo)", bg: "var(--indigo-soft)" },
 };
 
+/**
+ * Sign-in button colors per traveler. Hardcoded hex on purpose: the login
+ * screen renders before auth, so it can't read `profiles.color` — these
+ * mirror the values stored there. Change both together.
+ */
+export const TRAVELER_BUTTON: Record<string, { bg: string; ink: string }> = {
+  kevin: { bg: "#2dd4bf", ink: "#042f2a" },
+  hailey: { bg: "#fda4af", ink: "#4c0519" },
+};
+
 export const EXPENSE_COLOR: Record<ExpenseCategory, { fg: string; bg: string }> = {
   gas: { fg: "var(--slate)", bg: "var(--slate-soft)" },
   lodging: { fg: "var(--indigo)", bg: "var(--indigo-soft)" },

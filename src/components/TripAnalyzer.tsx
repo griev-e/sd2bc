@@ -3,13 +3,13 @@
 import { AnimatePresence, motion, useMotionValue, useTransform } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { IconSparkle, IconX } from "@/components/Icons";
-import {
-  analysisKey,
-  buildAnalysisPayload,
-  type AnalyzeEstimates,
-} from "@/lib/analysis";
+import { analysisKey, buildAnalysisPayload } from "@/lib/analysis";
+import { computeBudget } from "@/lib/budget";
+import { localDateISO } from "@/lib/format";
 import { FADE, SPRING, STAGGER_S } from "@/lib/motion";
-import { useTrip } from "@/lib/store";
+import { dayRoutePoints, sortDays, stopsForDay, useTrip } from "@/lib/store";
+import { supabase } from "@/lib/supabase";
+import { useWeather } from "@/lib/weather";
 import type { AnalysisInsight, InsightCategory } from "@/lib/types";
 
 /*
@@ -26,11 +26,12 @@ import type { AnalysisInsight, InsightCategory } from "@/lib/types";
   and a light beam on the hairline stand in for a spinner.
 */
 
-const CATEGORY_ORDER: InsightCategory[] = ["pacing", "route", "budget"];
+const CATEGORY_ORDER: InsightCategory[] = ["pacing", "route", "budget", "weather"];
 const CATEGORY_META: Record<InsightCategory, { label: string; color: string }> = {
   pacing: { label: "Pacing", color: "var(--gold)" },
   route: { label: "Route", color: "var(--sky)" },
   budget: { label: "Budget", color: "var(--green)" },
+  weather: { label: "Weather", color: "var(--violet)" },
 };
 
 /** Status copy while the model works — advances and holds on the last line
@@ -43,7 +44,7 @@ const SCAN_PHRASES = [
   "Writing it up…",
 ];
 
-export default function TripAnalyzer({ estimates }: { estimates: AnalyzeEstimates }) {
+export default function TripAnalyzer() {
   const trip = useTrip((s) => s.trip);
   const days = useTrip((s) => s.days);
   const stops = useTrip((s) => s.stops);
@@ -53,30 +54,67 @@ export default function TripAnalyzer({ estimates }: { estimates: AnalyzeEstimate
   const analyses = useTrip((s) => s.analyses);
   const saveAnalysis = useTrip((s) => s.saveAnalysis);
   const dismissInsight = useTrip((s) => s.dismissInsight);
+  const reorderStops = useTrip((s) => s.reorderStops);
+  const weatherByDay = useWeather((s) => s.byDay);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Same math as the Budget tab — computeBudget keeps the two in lockstep.
+  const budget = useMemo(
+    () => computeBudget(trip, days, stops, routes),
+    [trip, days, stops, routes],
+  );
+
+  // Key includes today's date: the payload carries live weather, so a cached
+  // analysis must not outlive the forecast that shaped it.
   const key = useMemo(
-    () => (trip ? analysisKey(trip, days, stops, viaPoints) : null),
+    () => (trip ? analysisKey(trip, days, stops, viaPoints, localDateISO()) : null),
     [trip, days, stops, viaPoints],
   );
+
+  // Every day that CAN have a route must have one computed — analyzing a
+  // half-routed plan would cache "0-mile days" under the correct key.
+  const routesReady = useMemo(() => {
+    const ordered = sortDays(days);
+    return ordered.every((d, i) => {
+      const points = dayRoutePoints(d, i > 0 ? ordered[i - 1] : null, stops, viaPoints);
+      return points.length < 2 || routes[d.id] !== undefined;
+    });
+  }, [days, stops, viaPoints, routes]);
 
   // fetchAllRows orders ascending, so the newest analysis sits last
   const latest = analyses.length > 0 ? analyses[analyses.length - 1] : null;
   const fresh = latest !== null && latest.key === key;
-  const canAnalyze = trip !== null && stops.length > 0 && !routesPending && !busy && !fresh;
+  const canAnalyze =
+    trip !== null && stops.length > 0 && !routesPending && routesReady && !busy && !fresh;
 
   async function analyze() {
     if (!trip || !key || !canAnalyze) return;
     setBusy(true);
     setError(null);
     try {
-      const payload = buildAnalysisPayload(trip, days, stops, routes, estimates);
+      const { data: sess } = await supabase().auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) throw new Error("You're signed out — sign in again first.");
+      const payload = buildAnalysisPayload(
+        trip,
+        days,
+        stops,
+        routes,
+        { ...budget.estimates, totalMiles: budget.totalMiles },
+        weatherByDay,
+      );
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(payload),
+        // a hair over the route's own 60s budget, so a hung connection can't
+        // pin the "Analyzing…" state forever
+        signal: AbortSignal.timeout(65_000),
       });
       const json = (await res.json().catch(() => null)) as {
         error?: string;
@@ -88,10 +126,41 @@ export default function TripAnalyzer({ estimates }: { estimates: AnalyzeEstimate
       }
       await saveAnalysis(key, json.model ?? "unknown", json.insights);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The analysis failed — try again.");
+      const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+      setError(
+        timedOut
+          ? "The analysis took too long — try again."
+          : err instanceof Error
+            ? err.message
+            : "The analysis failed — try again.",
+      );
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * If a route finding carries a usable stop order for its day, return the
+   * one-tap apply action; null when the names don't line up with the day
+   * anymore (plan moved) or the order is already in effect.
+   */
+  function orderApplication(insight: AnalysisInsight): (() => void) | null {
+    const order = insight.suggested_order;
+    if (!order || insight.day_seq == null) return null;
+    const day = days.find((d) => d.seq === insight.day_seq);
+    if (!day) return null;
+    const dayStops = stopsForDay(stops, day.id);
+    if (dayStops.length !== order.length) return null;
+    const pool = [...dayStops];
+    const ids: string[] = [];
+    for (const name of order) {
+      const idx = pool.findIndex((s) => s.name === name);
+      if (idx === -1) return null;
+      ids.push(pool[idx].id);
+      pool.splice(idx, 1);
+    }
+    if (ids.every((id, i) => dayStops[i].id === id)) return null; // already applied
+    return () => void reorderStops(day.id, ids);
   }
 
   const visible = latest ? latest.insights.filter((i) => !latest.dismissed.includes(i.id)) : [];
@@ -203,6 +272,7 @@ export default function TripAnalyzer({ estimates }: { estimates: AnalyzeEstimate
                     insight={insight}
                     index={i}
                     onDismiss={() => void dismissInsight(latest.id, insight.id)}
+                    onApply={orderApplication(insight)}
                   />
                 ))}
               </AnimatePresence>
@@ -224,10 +294,13 @@ function InsightRow({
   insight,
   index,
   onDismiss,
+  onApply,
 }: {
   insight: AnalysisInsight;
   index: number;
   onDismiss: () => void;
+  /** One-tap apply for a suggested stop order; null when not applicable. */
+  onApply: (() => void) | null;
 }) {
   const meta = CATEGORY_META[insight.category];
   const x = useMotionValue(0);
@@ -283,6 +356,14 @@ function InsightRow({
             {insight.title}
           </p>
           <p className="mt-1 text-xs leading-4.5 text-fg-muted">{insight.detail}</p>
+          {onApply && (
+            <button
+              onClick={onApply}
+              className="pressable mt-2 rounded-lg bg-accent-soft px-3 py-1.5 text-[11px] font-semibold text-accent"
+            >
+              Apply this order
+            </button>
+          )}
         </div>
         <button
           onClick={onDismiss}

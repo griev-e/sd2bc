@@ -2,10 +2,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 const generateLink = vi.fn();
+// state for the pin_attempts rate-limit ledger the route consults
+let recentFailures = 0;
+const insertedAttempts: { success: boolean }[] = [];
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: vi.fn(() => ({
     auth: { admin: { generateLink } },
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          gte: async () => ({ count: recentFailures }),
+        }),
+      }),
+      insert: async (row: { success: boolean }) => {
+        insertedAttempts.push(row);
+        return { error: null };
+      },
+      delete: () => ({
+        lt: async () => ({ error: null }),
+      }),
+    }),
   })),
 }));
 
@@ -48,6 +65,8 @@ describe("POST /api/pin-login", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     generateLink.mockReset();
+    recentFailures = 0;
+    insertedAttempts.length = 0;
     process.env.PIN_CODE = "1234";
     process.env.SUPABASE_SECRET_KEY = "secret-key";
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -85,6 +104,30 @@ describe("POST /api/pin-login", () => {
     const res = await promise;
     expect(res.status).toBe(401);
     expect(generateLink).not.toHaveBeenCalled();
+  });
+
+  it("records the attempt outcome in the pin_attempts ledger", async () => {
+    const bad = POST(makeReq({ user: "kevin", pin: "0000" }));
+    await vi.advanceTimersByTimeAsync(600);
+    await bad;
+    expect(insertedAttempts).toEqual([{ success: false }]);
+
+    generateLink.mockResolvedValue({
+      data: { properties: { hashed_token: "tok" } },
+      error: null,
+    });
+    const good = POST(makeReq({ user: "kevin", pin: "1234" }));
+    await vi.advanceTimersByTimeAsync(600);
+    await good;
+    expect(insertedAttempts).toEqual([{ success: false }, { success: true }]);
+  });
+
+  it("returns 429 once the hourly failure budget is spent — even for the right PIN", async () => {
+    recentFailures = 10;
+    const res = await POST(makeReq({ user: "kevin", pin: "1234" }));
+    expect(res.status).toBe(429);
+    expect(generateLink).not.toHaveBeenCalled();
+    expect(insertedAttempts).toEqual([]); // refused before the compare
   });
 
   it("mints a magic link on a correct PIN", async () => {

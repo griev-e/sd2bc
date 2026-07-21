@@ -23,27 +23,28 @@ import AddStopSheet from "@/components/AddStopSheet";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
-import { IconGrip, IconMoon, IconPlus, IconSparkle, IconTrash } from "@/components/Icons";
+import { IconGrip, IconMoon, IconPin, IconPlus, IconSparkle, IconTrash } from "@/components/Icons";
 import Sheet from "@/components/Sheet";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
+import { directionsUrl } from "@/lib/directions";
 import { FADE, riseIn, SPRING } from "@/lib/motion";
 import { dayEmoji, NATURE_EMOJI } from "@/lib/emoji";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
+import type { LngLat } from "@/lib/geo";
 import { type StopSchedule, useSchedule } from "@/lib/schedule";
-import { stopsForDay, useTrip } from "@/lib/store";
+import { stopsForDay, useOrderedDays, useTrip } from "@/lib/store";
 import { type ClusterWeather, useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
 
 export default function DaysPage() {
-  const days = useTrip((s) => s.days);
   const routes = useTrip((s) => s.routes);
   const routesPending = useTrip((s) => s.routesPending);
   const addDay = useTrip((s) => s.addDay);
 
-  const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
+  const orderedDays = useOrderedDays();
 
   const totals = useMemo(() => {
     let dist = 0;
@@ -86,6 +87,7 @@ export default function DaysPage() {
             <DayCard
               key={day.id}
               day={day}
+              prevDay={i > 0 ? orderedDays[i - 1] : null}
               index={i}
               total={orderedDays.length}
               route={routes[day.id]}
@@ -124,6 +126,7 @@ function Stat({ value, label }: { value: string; label: string }) {
 
 function DayCard({
   day,
+  prevDay,
   index,
   total,
   route,
@@ -132,6 +135,8 @@ function DayCard({
   onSuggest,
 }: {
   day: Day;
+  /** The day before this one — its overnight stop is the morning origin. */
+  prevDay: Day | null;
   index: number;
   total: number;
   route?: DayRoute;
@@ -183,6 +188,19 @@ function DayCard({
     if (!route || dayStops.length === 0) return null;
     return route.segments.find((s) => s.toStopId === dayStops[0].id) ?? null;
   }, [route, dayStops]);
+
+  // Hand this day's drive to Google Maps: last night's stay (if any) through
+  // every stop in order. Keyless universal URL — see lib/directions.
+  const navUrl = useMemo(() => {
+    const points: LngLat[] = [];
+    if (prevDay) {
+      const prevStops = stopsForDay(stops, prevDay.id);
+      const origin = prevStops[prevStops.length - 1];
+      if (origin) points.push([origin.lng, origin.lat]);
+    }
+    for (const s of dayStops) points.push([s.lng, s.lat]);
+    return directionsUrl(points);
+  }, [prevDay, stops, dayStops]);
 
   // When the day's first stop has an ETA, back out when to leave last night's
   // stay to make it — the departure we never show as its own stop.
@@ -323,6 +341,17 @@ function DayCard({
         >
           <IconSparkle size={13} /> Suggest nearby
         </button>
+        {navUrl && (
+          <a
+            href={navUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Navigate day ${day.seq} in Google Maps`}
+            className="btn-ghost pressable flex min-h-[38px] w-10 flex-shrink-0 items-center justify-center rounded-xl !text-fg-faint"
+          >
+            <IconPin size={14} />
+          </a>
+        )}
         <button
           onClick={() => {
             if (confirmDelete) void deleteDay(day.id);
@@ -458,6 +487,16 @@ function SortableStop({
       )}
 
       <div
+        // role/tabIndex/keydown instead of <button>: the row contains the
+        // drag-handle button, and interactive elements must not nest
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onTap();
+          }
+        }}
         className="flex min-h-[52px] items-center gap-3 rounded-xl py-1.5 pr-1 active:bg-fg/5"
         onClick={onTap}
       >

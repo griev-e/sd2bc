@@ -6,6 +6,8 @@ import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { IconCamera } from "@/components/Icons";
 import { displayName } from "@/lib/format";
+import { buildItineraryIcs } from "@/lib/ics";
+import { getSchedule } from "@/lib/schedule";
 import { useTrip } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
 import {
@@ -30,6 +32,20 @@ export default function MorePage() {
 
   const me = profiles.find((p) => p.id === userId);
   const partner = profiles.find((p) => p.id !== userId);
+
+  // Itinerary → .ics, built fully client-side; opens in the share/download
+  // flow so it lands in Apple/Google Calendar next to real reservations.
+  function exportIcs() {
+    const { trip, days, stops, routes } = useTrip.getState();
+    if (!trip) return;
+    const ics = buildItineraryIcs(trip, days, stops, getSchedule(days, stops, routes));
+    const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "coastline-itinerary.ics";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   const theme = useSyncExternalStore(themeSubscribe, getThemePref, serverThemePref);
   const accent = useSyncExternalStore(themeSubscribe, getAccentPref, serverAccentPref);
 
@@ -160,6 +176,21 @@ export default function MorePage() {
               ))}
             </div>
           )}
+        </section>
+
+        {/* itinerary export */}
+        <section className="card p-5">
+          <p className="eyebrow mb-2">Itinerary</p>
+          <p className="text-xs leading-5 text-fg-muted">
+            One all-day calendar event per trip day, with the stop list and
+            live ETAs in the notes.
+          </p>
+          <button
+            onClick={exportIcs}
+            className="btn-ghost pressable mt-3 h-11 w-full rounded-xl text-sm font-semibold"
+          >
+            Export to calendar (.ics)
+          </button>
         </section>
 
         {/* about the data */}

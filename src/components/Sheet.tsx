@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FADE, SPRING_SHEET } from "@/lib/motion";
 
@@ -81,6 +81,21 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
     return unlockBodyScroll;
   }, [open]);
 
+  // Dialog focus contract: move focus into the sheet when it opens (so screen
+  // readers land in it), and hand it back to the opener on close.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (open) {
+      restoreRef.current = document.activeElement as HTMLElement | null;
+      // after the portal mounts — preventScroll, the page behind is locked
+      requestAnimationFrame(() => panelRef.current?.focus({ preventScroll: true }));
+    } else if (restoreRef.current) {
+      restoreRef.current.focus?.({ preventScroll: true });
+      restoreRef.current = null;
+    }
+  }, [open]);
+
   const keyboardInset = useKeyboardInset(open);
 
   if (typeof document === "undefined") return null;
@@ -98,7 +113,12 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
             onClick={onClose}
           />
           <motion.div
-            className="glass-strong fixed inset-x-0 bottom-0 z-50 mx-auto flex max-w-md flex-col rounded-t-3xl border-b-0"
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={title ?? "Sheet"}
+            tabIndex={-1}
+            className="glass-strong fixed inset-x-0 bottom-0 z-50 mx-auto flex max-w-md flex-col rounded-t-3xl border-b-0 outline-none"
             style={{
               // ride above the iOS keyboard, and never grow taller than the
               // strip that's still visible over it (100dvh ignores keyboards)

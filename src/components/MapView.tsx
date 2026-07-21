@@ -3,7 +3,7 @@
 import maplibregl, { Map as MLMap, Marker, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_SATELLITE } from "@/lib/config";
 import { IconLayers } from "./Icons";
 import { clusterKey, clusterStops } from "@/lib/clusters";
@@ -12,7 +12,7 @@ import { bboxOf, type LngLat } from "@/lib/geo";
 import { FADE, riseIn } from "@/lib/motion";
 import { SUGGESTION_CATEGORIES } from "@/lib/overpass";
 import { insertShapingPoint } from "@/lib/shaping";
-import { stopsForDay, useTrip } from "@/lib/store";
+import { stopsForDay, useOrderedDays, useTrip } from "@/lib/store";
 import { useSuggestionPreview } from "@/lib/suggestionPreview";
 import { effectiveDark } from "@/lib/theme";
 import { useWeather, WEATHER_EMOJI, weatherKind } from "@/lib/weather";
@@ -45,6 +45,8 @@ function addRouteLayers(map: MLMap, mode: StyleMode, dark: boolean) {
     source: "routes",
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
+      // raw hex, not tokens — MapLibre paints on canvas and can't read CSS
+      // vars; values mirror --bg-elevated / near-black from globals.css
       "line-color": mode === "satellite" ? "#ffffff" : dark ? "#0a0f13" : "#ffffff",
       "line-width": 7,
       "line-opacity": ["get", "opacity"],
@@ -99,7 +101,6 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     setShowViasPref(true);
   });
 
-  const days = useTrip((s) => s.days);
   const stops = useTrip((s) => s.stops);
   const viaPoints = useTrip((s) => s.viaPoints);
   const routes = useTrip((s) => s.routes);
@@ -110,7 +111,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
   const byCluster = useWeather((s) => s.byCluster);
 
-  const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
+  const orderedDays = useOrderedDays();
 
   // ---- init ---------------------------------------------------------------
   useEffect(() => {
