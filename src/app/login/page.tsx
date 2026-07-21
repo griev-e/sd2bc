@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { IconWave } from "@/components/Icons";
+import { TRAVELER_BUTTON } from "@/lib/colors";
 import { riseIn } from "@/lib/motion";
 import { supabase, usernameToEmail } from "@/lib/supabase";
 
@@ -15,8 +16,8 @@ import { supabase, usernameToEmail } from "@/lib/supabase";
  */
 
 const TRAVELERS = [
-  { key: "kevin", label: "kevin", color: "#2dd4bf", ink: "#042f2a" },
-  { key: "hailey", label: "hailey", color: "#fda4af", ink: "#4c0519" },
+  { key: "kevin", label: "kevin", ...TRAVELER_BUTTON.kevin },
+  { key: "hailey", label: "hailey", ...TRAVELER_BUTTON.hailey },
 ];
 
 export default function LoginPage() {
@@ -90,9 +91,9 @@ export default function LoginPage() {
                 }}
                 className="pressable h-16 w-full rounded-2xl text-lg font-semibold tracking-tight"
                 style={{
-                  background: t.color,
+                  background: t.bg,
                   color: t.ink,
-                  boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 6px 18px -6px ${t.color}`,
+                  boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 6px 18px -6px ${t.bg}`,
                 }}
               >
                 {t.label}

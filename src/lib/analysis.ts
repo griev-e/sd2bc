@@ -8,6 +8,7 @@ import {
   FOOD_PER_PERSON_DAY,
   nightCost,
 } from "./costs";
+import { WEATHER_LABEL, weatherKind, type DayWeather } from "./weather";
 import type { Day, DayRoute, Stop, Trip, ViaPoint } from "./types";
 
 /*
@@ -42,6 +43,8 @@ interface AnalyzeDay {
   drive_miles: number;
   drive_min: number;
   has_overnight: boolean;
+  /** Forecast for the day's overnight area; null beyond the ~16-day horizon. */
+  weather: { condition: string; high_f: number; low_f: number } | null;
   stops: AnalyzeStop[];
   /** Stop→stop legs, to spot long segments with no food or fuel stop. */
   legs: { from: string; to: string; miles: number; min: number }[];
@@ -86,10 +89,18 @@ export function analysisKey(
   days: Day[],
   stops: Stop[],
   viaPoints: ViaPoint[],
+  /**
+   * Coarse freshness bucket (today's YYYY-MM-DD). The payload carries live
+   * weather, so a cached analysis must not outlive the forecast that shaped
+   * it — bucketing by day invalidates the cache each morning without
+   * thrashing it on every forecast refresh.
+   */
+  dateBucket?: string,
 ): string {
   const parts: string[] = [
     `t:${trip.start_date}|${trip.mpg}|${trip.travelers}|${trip.food_per_day ?? ""}|${trip.activities_per_day ?? ""}`,
   ];
+  if (dateBucket) parts.push(`w:${dateBucket}`);
   for (const day of sortedDays(days)) {
     parts.push(`d:${day.seq}|${day.date}`);
     const dayStops = stops
@@ -126,6 +137,8 @@ export function buildAnalysisPayload(
   stops: Stop[],
   routes: Record<string, DayRoute>,
   estimates: AnalyzeEstimates,
+  /** Daily forecast per day id (from the weather store); optional. */
+  weatherByDay: Record<string, DayWeather | undefined> = {},
 ): AnalyzePayload {
   const ordered = sortedDays(days);
   const stopById = new Map(stops.map((s) => [s.id, s]));
@@ -144,6 +157,7 @@ export function buildAnalysisPayload(
       min: Math.round(seg.durationS / 60),
     }));
     const first = dayStops[0];
+    const w = weatherByDay[day.id];
     return {
       seq: day.seq,
       date: day.date,
@@ -152,6 +166,9 @@ export function buildAnalysisPayload(
       drive_miles: Math.round((route?.distanceM ?? 0) / M_PER_MI),
       drive_min: Math.round((route?.durationS ?? 0) / 60),
       has_overnight: dayStops.some((s) => s.is_overnight),
+      weather: w
+        ? { condition: WEATHER_LABEL[weatherKind(w.code)], high_f: w.tMaxF, low_f: w.tMinF }
+        : null,
       stops: dayStops.map((s) => {
         const sched = schedule.get(s.id);
         return {

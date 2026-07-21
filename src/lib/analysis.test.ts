@@ -115,6 +115,13 @@ describe("analysisKey", () => {
       analysisKey(trip, days, stops, vias),
     );
   });
+
+  it("rolls with the date bucket (weather freshness) but is stable within it", () => {
+    const monday = analysisKey(trip, days, stops, vias, "2026-07-27");
+    expect(analysisKey(trip, days, stops, vias, "2026-07-27")).toBe(monday);
+    expect(analysisKey(trip, days, stops, vias, "2026-07-28")).not.toBe(monday);
+    expect(analysisKey(trip, days, stops, vias)).not.toBe(monday);
+  });
 });
 
 describe("buildAnalysisPayload", () => {
@@ -188,5 +195,19 @@ describe("buildAnalysisPayload", () => {
     const empty = buildAnalysisPayload(trip, [], [], {}, NO_ESTIMATES);
     expect(empty.days).toEqual([]);
     expect(empty.trip.total_days).toBe(1);
+  });
+
+  it("carries each day's forecast when one exists, null past the horizon", () => {
+    const withWeather = buildAnalysisPayload(trip, days, stops, routes, NO_ESTIMATES, {
+      "day-1": { code: 61, tMaxF: 64.6, tMinF: 55.2 },
+    });
+    expect(withWeather.days[0].weather).toEqual({
+      condition: "Rain",
+      high_f: 64.6,
+      low_f: 55.2,
+    });
+    expect(withWeather.days[1].weather).toBeNull();
+    // omitting the map entirely stays valid (older callers)
+    expect(payload.days[0].weather).toBeNull();
   });
 });

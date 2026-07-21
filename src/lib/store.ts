@@ -1,9 +1,17 @@
 "use client";
 
+import { useMemo } from "react";
 import { create } from "zustand";
 import { supabase } from "./supabase";
 import { localDateISO } from "./format";
 import { fetchRoute, primeRouteCache } from "./osrm";
+import {
+  enqueueOutbox,
+  flushOutbox,
+  isNetworkError,
+  outboxSize,
+  type OutboxOp,
+} from "./outbox";
 import type { LngLat } from "./geo";
 import type {
   ActivityEntry,
@@ -49,6 +57,9 @@ interface TripState {
   routesPending: boolean;
   routeError: string | null;
 
+  /** One-line status for the last write that failed or was queued offline. */
+  toast: { id: number; text: string } | null;
+
   // UI state shared between tabs
   selectedDayId: string | null;
   selectedStopId: string | null;
@@ -58,6 +69,9 @@ interface TripState {
 
   /** Debounced route recompute — for callers outside the store (e.g. shaping). */
   refreshRoutes: () => void;
+  /** Full refetch + reconcile — for callers that bypassed the mutations (shaping). */
+  resync: () => Promise<void>;
+  dismissToast: () => void;
 
   setSelectedDay: (dayId: string | null) => void;
   setSelectedStop: (stopId: string | null) => void;
@@ -65,7 +79,7 @@ interface TripState {
   // stops
   addStop: (
     dayId: string,
-    stop: { name: string; lat: number; lng: number; kind?: Stop["kind"] },
+    stop: { name: string; lat: number; lng: number; kind?: Stop["kind"]; notes?: string },
   ) => Promise<void>;
   updateStop: (id: string, patch: Partial<Stop>) => Promise<void>;
   deleteStop: (id: string) => Promise<void>;
@@ -118,9 +132,21 @@ let channelWasDown = false;
 let lastRefetchAt = 0;
 let authSub: { unsubscribe: () => void } | null = null;
 let visHandler: (() => void) | null = null;
+let onlineHandler: (() => void) | null = null;
+// Writes currently in flight — refetchAll waits for these so a full re-pull
+// can't stomp state an optimistic write is about to confirm.
+let pendingWrites = 0;
+let toastSeq = 0;
 
-function sortDays(days: Day[]): Day[] {
+/** Days in itinerary order (by seq). */
+export function sortDays(days: Day[]): Day[] {
   return [...days].sort((a, b) => a.seq - b.seq);
+}
+
+/** Memoized `sortDays` over the live store — the app's most-repeated derive. */
+export function useOrderedDays(): Day[] {
+  const days = useTrip((s) => s.days);
+  return useMemo(() => sortDays(days), [days]);
 }
 
 /** 'YYYY-MM-DD' + n days, timezone-proof. */
@@ -256,6 +282,50 @@ export const useTrip = create<TripState>((set, get) => {
     routeTimer = setTimeout(() => void computeRoutes(), delay);
   }
 
+  function showToast(text: string) {
+    set({ toast: { id: ++toastSeq, text } });
+  }
+
+  /**
+   * Run one persistence call. Every mutation goes through here so that
+   * (a) refetchAll can wait for in-flight writes, and (b) a failure caused by
+   * a dead connection — not a server rejection — keeps the optimistic state
+   * and parks the op in the offline outbox instead of rolling back. Callers
+   * roll back ONLY on "error".
+   */
+  async function runWrite(
+    exec: () => PromiseLike<{ error: { message?: string } | null }>,
+    offline?: OutboxOp | OutboxOp[],
+  ): Promise<"ok" | "queued" | "error"> {
+    pendingWrites++;
+    try {
+      let error: unknown = null;
+      try {
+        ({ error } = await exec());
+      } catch (err) {
+        error = err; // storage/auth helpers can throw instead of returning
+      }
+      if (!error) return "ok";
+      if (offline && isNetworkError(error)) {
+        enqueueOutbox(offline);
+        showToast("Offline — saved on this phone, will sync.");
+        return "queued";
+      }
+      showToast("Couldn't save that change.");
+      return "error";
+    } finally {
+      pendingWrites--;
+    }
+  }
+
+  /** Wait (bounded) for the write path to go quiet before a full re-pull. */
+  async function waitForWrites(maxMs = 4000) {
+    const start = Date.now();
+    while (pendingWrites > 0 && Date.now() - start < maxMs) {
+      await new Promise((r) => setTimeout(r, 120));
+    }
+  }
+
   async function computeDayRoute(day: Day, prevDay: Day | null, stops: Stop[], vias: ViaPoint[]): Promise<DayRoute> {
     const points = dayRoutePoints(day, prevDay, stops, vias);
     if (points.length < 2) {
@@ -353,7 +423,9 @@ export const useTrip = create<TripState>((set, get) => {
       db.from("stops").select("*"),
       db.from("via_points").select("*"),
       db.from("packing_items").select("*"),
-      db.from("game_events").select("*").order("created_at", { ascending: true }),
+      // newest first + a cap — the table is append-only and would otherwise
+      // grow every load forever; 1000 events is far beyond a summer of games
+      db.from("game_events").select("*").order("created_at", { ascending: false }).limit(1000),
       db.from("trip_analyses").select("*").order("created_at", { ascending: true }),
     ]);
     const failed = [profiles, trips, days, stops, vias, packing, games, analyses].find(
@@ -367,7 +439,8 @@ export const useTrip = create<TripState>((set, get) => {
       stops: (stops.data as Stop[]) ?? [],
       viaPoints: (vias.data as ViaPoint[]) ?? [],
       packing: (packing.data as PackingItem[]) ?? [],
-      gameEvents: (games.data as GameEvent[]) ?? [],
+      // back to ascending — consumers assume chronological order
+      gameEvents: (((games.data as GameEvent[]) ?? [])).slice().reverse(),
       analyses: (analyses.data as TripAnalysis[]) ?? [],
     };
   }
@@ -377,6 +450,10 @@ export const useTrip = create<TripState>((set, get) => {
    * the foreground, local state may have silently missed events.
    */
   async function refetchAll() {
+    // let in-flight optimistic writes settle, then replay anything queued
+    // while offline BEFORE reading, so the read reflects our own edits
+    await waitForWrites();
+    if (outboxSize() > 0) await flushOutbox(supabase());
     try {
       const rows = await fetchAllRows();
       lastRefetchAt = Date.now();
@@ -446,6 +523,7 @@ export const useTrip = create<TripState>((set, get) => {
     routes: {},
     routesPending: false,
     routeError: null,
+    toast: null,
     selectedDayId: null,
     selectedStopId: null,
 
@@ -466,6 +544,8 @@ export const useTrip = create<TripState>((set, get) => {
           lastRefetchAt = Date.now();
           set({ ...rows, loaded: true });
           scheduleRoutes(50);
+          // edits queued while the app was last offline: replay, then re-pull
+          if (outboxSize() > 0) void refetchAll();
         } catch (err) {
           if (get().userId !== userId) return;
           // Dead zone / flaky cell data: serve the last good load from this
@@ -548,6 +628,12 @@ export const useTrip = create<TripState>((set, get) => {
           }
         };
         document.addEventListener("visibilitychange", visHandler);
+
+        // back online → flush the outbox and reconcile right away
+        onlineHandler = () => {
+          if (get().loaded) void refetchAll();
+        };
+        window.addEventListener("online", onlineHandler);
       })();
 
       initPromise = run.finally(() => {
@@ -571,6 +657,10 @@ export const useTrip = create<TripState>((set, get) => {
       if (visHandler) {
         document.removeEventListener("visibilitychange", visHandler);
         visHandler = null;
+      }
+      if (onlineHandler) {
+        window.removeEventListener("online", onlineHandler);
+        onlineHandler = null;
       }
       channelWasDown = false;
       // invalidate any in-flight route batch and pending debounce
@@ -597,12 +687,15 @@ export const useTrip = create<TripState>((set, get) => {
         routes: {},
         routesPending: false,
         routeError: null,
+        toast: null,
         selectedDayId: null,
         selectedStopId: null,
       });
     },
 
     refreshRoutes: () => scheduleRoutes(),
+    resync: () => refetchAll(),
+    dismissToast: () => set({ toast: null }),
 
     setSelectedDay: (dayId) => set({ selectedDayId: dayId }),
     setSelectedStop: (stopId) => set({ selectedStopId: stopId }),
@@ -636,7 +729,7 @@ export const useTrip = create<TripState>((set, get) => {
       };
       set({ stops: [...s.stops, row] });
       scheduleRoutes();
-      const { error } = await supabase().from("stops").insert({
+      const payload = {
         id: row.id,
         trip_id: row.trip_id,
         day_id: row.day_id,
@@ -645,10 +738,15 @@ export const useTrip = create<TripState>((set, get) => {
         lat: row.lat,
         lng: row.lng,
         kind: row.kind,
+        notes: row.notes,
         created_by: s.userId,
         updated_by: s.userId,
-      });
-      if (error) {
+      };
+      const result = await runWrite(
+        () => supabase().from("stops").insert(payload),
+        { table: "stops", op: "insert", values: payload },
+      );
+      if (result === "error") {
         set({ stops: get().stops.filter((x) => x.id !== row.id) });
         scheduleRoutes();
       }
@@ -664,12 +762,22 @@ export const useTrip = create<TripState>((set, get) => {
       });
       const geometry = ROUTE_FIELDS.stops!.some((f) => f in patch);
       if (geometry) scheduleRoutes();
-      const { error } = await supabase()
-        .from("stops")
-        .update({ ...patch, updated_by: s.userId })
-        .eq("id", id);
-      if (error && prev) {
-        set({ stops: get().stops.map((x) => (x.id === id ? prev : x)) });
+      const values = { ...patch, updated_by: s.userId };
+      const result = await runWrite(
+        () => supabase().from("stops").update(values).eq("id", id),
+        { table: "stops", op: "update", id, values },
+      );
+      if (result === "error" && prev) {
+        // Roll back ONLY the fields this patch touched — a second edit to
+        // other fields may have landed while this one was in flight.
+        const revert = Object.fromEntries(
+          Object.keys(patch).map((k) => [k, prev[k as keyof Stop]]),
+        ) as Partial<Stop>;
+        set({
+          stops: get().stops.map((x) =>
+            x.id === id ? { ...x, ...revert, updated_by: prev.updated_by } : x,
+          ),
+        });
         if (geometry) scheduleRoutes();
       }
     },
@@ -684,8 +792,11 @@ export const useTrip = create<TripState>((set, get) => {
         selectedStopId: s.selectedStopId === id ? null : s.selectedStopId,
       });
       scheduleRoutes();
-      const { error } = await supabase().from("stops").delete().eq("id", id);
-      if (error && prevStop) {
+      const result = await runWrite(
+        () => supabase().from("stops").delete().eq("id", id),
+        { table: "stops", op: "delete", id },
+      );
+      if (result === "error" && prevStop) {
         set({
           stops: [...get().stops, prevStop],
           viaPoints: [...get().viaPoints, ...prevVias],
@@ -709,14 +820,15 @@ export const useTrip = create<TripState>((set, get) => {
       // the ON CONFLICT UPDATE path, so rows missing NOT NULL columns
       // (trip_id, name, lat…) are rejected even though every row exists.
       const results = await Promise.all(
-        orderedIds.map((id, i) =>
-          supabase()
-            .from("stops")
-            .update({ seq: i + 1, updated_by: s.userId })
-            .eq("id", id),
-        ),
+        orderedIds.map((id, i) => {
+          const values = { seq: i + 1, updated_by: s.userId };
+          return runWrite(
+            () => supabase().from("stops").update(values).eq("id", id),
+            { table: "stops", op: "update", id, values },
+          );
+        }),
       );
-      if (results.some((r) => r.error)) {
+      if (results.includes("error")) {
         set({ stops: prevStops });
         scheduleRoutes();
       }
@@ -737,7 +849,7 @@ export const useTrip = create<TripState>((set, get) => {
       };
       set({ viaPoints: [...s.viaPoints, row] });
       scheduleRoutes();
-      const { error } = await supabase().from("via_points").insert({
+      const payload = {
         id: row.id,
         trip_id: row.trip_id,
         after_stop_id: afterStopId,
@@ -745,8 +857,12 @@ export const useTrip = create<TripState>((set, get) => {
         lat,
         lng,
         created_by: s.userId,
-      });
-      if (error) {
+      };
+      const result = await runWrite(
+        () => supabase().from("via_points").insert(payload),
+        { table: "via_points", op: "insert", values: payload },
+      );
+      if (result === "error") {
         set({ viaPoints: get().viaPoints.filter((v) => v.id !== row.id) });
         scheduleRoutes();
       }
@@ -758,8 +874,11 @@ export const useTrip = create<TripState>((set, get) => {
         viaPoints: get().viaPoints.map((v) => (v.id === id ? { ...v, lng, lat } : v)),
       });
       scheduleRoutes();
-      const { error } = await supabase().from("via_points").update({ lng, lat }).eq("id", id);
-      if (error && prev) {
+      const result = await runWrite(
+        () => supabase().from("via_points").update({ lng, lat }).eq("id", id),
+        { table: "via_points", op: "update", id, values: { lng, lat } },
+      );
+      if (result === "error" && prev) {
         set({ viaPoints: get().viaPoints.map((v) => (v.id === id ? prev : v)) });
         scheduleRoutes();
       }
@@ -769,8 +888,11 @@ export const useTrip = create<TripState>((set, get) => {
       const prev = get().viaPoints.find((v) => v.id === id);
       set({ viaPoints: get().viaPoints.filter((v) => v.id !== id) });
       scheduleRoutes();
-      const { error } = await supabase().from("via_points").delete().eq("id", id);
-      if (error && prev) {
+      const result = await runWrite(
+        () => supabase().from("via_points").delete().eq("id", id),
+        { table: "via_points", op: "delete", id },
+      );
+      if (result === "error" && prev) {
         set({ viaPoints: [...get().viaPoints, prev] });
         scheduleRoutes();
       }
@@ -779,8 +901,11 @@ export const useTrip = create<TripState>((set, get) => {
     updateDay: async (id, patch) => {
       const prev = get().days.find((d) => d.id === id);
       set({ days: get().days.map((d) => (d.id === id ? { ...d, ...patch } : d)) });
-      const { error } = await supabase().from("days").update(patch).eq("id", id);
-      if (error && prev) {
+      const result = await runWrite(
+        () => supabase().from("days").update(patch).eq("id", id),
+        { table: "days", op: "update", id, values: patch as Record<string, unknown> },
+      );
+      if (result === "error" && prev) {
         set({ days: get().days.map((d) => (d.id === id ? prev : d)) });
       }
     },
@@ -803,14 +928,18 @@ export const useTrip = create<TripState>((set, get) => {
         updated_at: now,
       };
       set({ days: [...s.days, row] });
-      const { error } = await supabase().from("days").insert({
+      const payload = {
         id: row.id,
         trip_id: row.trip_id,
         seq: row.seq,
         date: row.date,
         title: "",
-      });
-      if (error) set({ days: get().days.filter((d) => d.id !== row.id) });
+      };
+      const result = await runWrite(
+        () => supabase().from("days").insert(payload),
+        { table: "days", op: "insert", values: payload },
+      );
+      if (result === "error") set({ days: get().days.filter((d) => d.id !== row.id) });
     },
 
     deleteDay: async (id) => {
@@ -834,34 +963,48 @@ export const useTrip = create<TripState>((set, get) => {
       scheduleRoutes();
 
       const db = supabase();
-      let error: unknown = null;
+      // Multi-statement (delete vias → stops → day → renumber) — too
+      // interdependent to queue offline op-by-op, so no outbox here: on any
+      // failure re-pull truth rather than guess which parts landed.
+      let failed = false;
       if (stopIds.length > 0) {
-        ({ error } = await db.from("via_points").delete().in("after_stop_id", stopIds));
-        if (!error) ({ error } = await db.from("stops").delete().eq("day_id", id));
+        failed =
+          (await runWrite(() => db.from("via_points").delete().in("after_stop_id", stopIds))) !==
+          "ok";
+        if (!failed) {
+          failed = (await runWrite(() => db.from("stops").delete().eq("day_id", id))) !== "ok";
+        }
       }
-      if (!error) ({ error } = await db.from("days").delete().eq("id", id));
-      if (!error && remaining.length > 0) {
+      if (!failed) {
+        failed = (await runWrite(() => db.from("days").delete().eq("id", id))) !== "ok";
+      }
+      if (!failed && remaining.length > 0) {
         // renumber every surviving day — one UPDATE per row, since a
         // partial upsert trips days' NOT NULL columns (trip_id) on the
         // INSERT half of ON CONFLICT even when every row already exists
         const results = await Promise.all(
-          remaining.map((d) =>
-            db.from("days").update({ seq: d.seq, date: d.date }).eq("id", d.id),
-          ),
+          remaining.map((d) => {
+            const values = { seq: d.seq, date: d.date };
+            return runWrite(
+              () => db.from("days").update(values).eq("id", d.id),
+              { table: "days", op: "update", id: d.id, values },
+            );
+          }),
         );
-        error = results.find((r) => r.error)?.error ?? null;
+        failed = results.includes("error");
       }
-      // multi-statement delete — on any failure re-pull truth rather than
-      // trying to guess which parts landed
-      if (error) await refetchAll();
+      if (failed) await refetchAll();
     },
 
     updateTrip: async (patch) => {
       const trip = get().trip;
       if (!trip) return;
       set({ trip: { ...trip, ...patch } });
-      const { error } = await supabase().from("trips").update(patch).eq("id", trip.id);
-      if (error) set({ trip });
+      const result = await runWrite(
+        () => supabase().from("trips").update(patch).eq("id", trip.id),
+        { table: "trips", op: "update", id: trip.id, values: patch as Record<string, unknown> },
+      );
+      if (result === "error") set({ trip });
     },
 
     updateProfile: async (patch) => {
@@ -871,8 +1014,11 @@ export const useTrip = create<TripState>((set, get) => {
       set({
         profiles: s.profiles.map((p) => (p.id === s.userId ? { ...p, ...patch } : p)),
       });
-      const { error } = await supabase().from("profiles").update(patch).eq("id", s.userId);
-      if (error && prev) {
+      const result = await runWrite(
+        () => supabase().from("profiles").update(patch).eq("id", s.userId!),
+        { table: "profiles", op: "update", id: s.userId, values: patch },
+      );
+      if (result === "error" && prev) {
         set({ profiles: get().profiles.map((p) => (p.id === s.userId ? prev : p)) });
       }
     },
@@ -885,11 +1031,12 @@ export const useTrip = create<TripState>((set, get) => {
           p.id === id ? { ...p, checked, checked_by: checked ? s.userId : null } : p,
         ),
       });
-      const { error } = await supabase()
-        .from("packing_items")
-        .update({ checked, checked_by: checked ? s.userId : null, updated_by: s.userId })
-        .eq("id", id);
-      if (error && prev) {
+      const values = { checked, checked_by: checked ? s.userId : null, updated_by: s.userId };
+      const result = await runWrite(
+        () => supabase().from("packing_items").update(values).eq("id", id),
+        { table: "packing_items", op: "update", id, values },
+      );
+      if (result === "error" && prev) {
         set({ packing: get().packing.map((p) => (p.id === id ? prev : p)) });
       }
     },
@@ -914,7 +1061,7 @@ export const useTrip = create<TripState>((set, get) => {
         updated_at: now,
       };
       set({ packing: [...s.packing, row] });
-      const { error } = await supabase().from("packing_items").insert({
+      const payload = {
         id: row.id,
         trip_id: row.trip_id,
         category,
@@ -923,28 +1070,44 @@ export const useTrip = create<TripState>((set, get) => {
         seq: row.seq,
         created_by: s.userId,
         updated_by: s.userId,
-      });
-      if (error) set({ packing: get().packing.filter((p) => p.id !== row.id) });
+      };
+      const result = await runWrite(
+        () => supabase().from("packing_items").insert(payload),
+        { table: "packing_items", op: "insert", values: payload },
+      );
+      if (result === "error") set({ packing: get().packing.filter((p) => p.id !== row.id) });
     },
 
     updatePackingItem: async (id, patch) => {
       const s = get();
       const prev = s.packing.find((p) => p.id === id);
       set({ packing: s.packing.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
-      const { error } = await supabase()
-        .from("packing_items")
-        .update({ ...patch, updated_by: s.userId })
-        .eq("id", id);
-      if (error && prev) {
-        set({ packing: get().packing.map((p) => (p.id === id ? prev : p)) });
+      const values = { ...patch, updated_by: s.userId };
+      const result = await runWrite(
+        () => supabase().from("packing_items").update(values).eq("id", id),
+        { table: "packing_items", op: "update", id, values },
+      );
+      if (result === "error" && prev) {
+        // field-level rollback — see updateStop
+        const revert = Object.fromEntries(
+          Object.keys(patch).map((k) => [k, prev[k as keyof PackingItem]]),
+        ) as Partial<PackingItem>;
+        set({
+          packing: get().packing.map((p) =>
+            p.id === id ? { ...p, ...revert, updated_by: prev.updated_by } : p,
+          ),
+        });
       }
     },
 
     deletePackingItem: async (id) => {
       const prev = get().packing.find((p) => p.id === id);
       set({ packing: get().packing.filter((p) => p.id !== id) });
-      const { error } = await supabase().from("packing_items").delete().eq("id", id);
-      if (error && prev) set({ packing: [...get().packing, prev] });
+      const result = await runWrite(
+        () => supabase().from("packing_items").delete().eq("id", id),
+        { table: "packing_items", op: "delete", id },
+      );
+      if (result === "error" && prev) set({ packing: [...get().packing, prev] });
     },
 
     addGameEvent: async (e) => {
@@ -959,23 +1122,34 @@ export const useTrip = create<TripState>((set, get) => {
         created_at: new Date().toISOString(),
       };
       set({ gameEvents: [...s.gameEvents, row] });
-      const { error } = await supabase().from("game_events").insert({
+      const payload = {
         id: row.id,
         game: row.game,
         kind: row.kind,
         key: row.key,
         value: row.value,
         created_by: s.userId,
-      });
+      };
+      // Offline claims queue and replay; one that lost the race while we were
+      // away is rejected by the unique index at flush time and dropped there.
+      const result = await runWrite(
+        () => supabase().from("game_events").insert(payload),
+        { table: "game_events", op: "insert", values: payload },
+      );
       // e.g. a claim raced the other phone and lost the unique index
-      if (error) set({ gameEvents: get().gameEvents.filter((x) => x.id !== row.id) });
+      if (result === "error") {
+        set({ gameEvents: get().gameEvents.filter((x) => x.id !== row.id) });
+      }
     },
 
     deleteGameEvent: async (id) => {
       const prev = get().gameEvents.find((x) => x.id === id);
       set({ gameEvents: get().gameEvents.filter((x) => x.id !== id) });
-      const { error } = await supabase().from("game_events").delete().eq("id", id);
-      if (error && prev) set({ gameEvents: [...get().gameEvents, prev] });
+      const result = await runWrite(
+        () => supabase().from("game_events").delete().eq("id", id),
+        { table: "game_events", op: "delete", id },
+      );
+      if (result === "error" && prev) set({ gameEvents: [...get().gameEvents, prev] });
     },
 
     saveAnalysis: async (key, model, insights) => {
@@ -997,20 +1171,23 @@ export const useTrip = create<TripState>((set, get) => {
       // one live analysis per trip — older rows are stale cache, drop them
       set({ analyses: [row] });
       // upsert on key: if the other phone raced us to the same trip state,
-      // last write wins and Realtime reconciles both to one row
-      const { error } = await supabase().from("trip_analyses").upsert(
-        {
-          id: row.id,
-          trip_id: row.trip_id,
-          key,
-          model,
-          insights,
-          dismissed: [],
-          created_by: s.userId,
-        },
-        { onConflict: "key" },
+      // last write wins and Realtime reconciles both to one row. No outbox —
+      // an analysis only ever exists right after a successful network call.
+      const result = await runWrite(() =>
+        supabase().from("trip_analyses").upsert(
+          {
+            id: row.id,
+            trip_id: row.trip_id,
+            key,
+            model,
+            insights,
+            dismissed: [],
+            created_by: s.userId,
+          },
+          { onConflict: "key" },
+        ),
       );
-      if (error) {
+      if (result !== "ok") {
         set({ analyses: prev });
         return;
       }
@@ -1029,11 +1206,12 @@ export const useTrip = create<TripState>((set, get) => {
       set({
         analyses: s.analyses.map((a) => (a.id === analysisId ? { ...a, dismissed } : a)),
       });
-      const { error } = await supabase()
-        .from("trip_analyses")
-        .update({ dismissed, updated_at: new Date().toISOString() })
-        .eq("id", analysisId);
-      if (error) {
+      const values = { dismissed, updated_at: new Date().toISOString() };
+      const result = await runWrite(
+        () => supabase().from("trip_analyses").update(values).eq("id", analysisId),
+        { table: "trip_analyses", op: "update", id: analysisId, values },
+      );
+      if (result === "error") {
         set({
           analyses: get().analyses.map((a) => (a.id === analysisId ? prev : a)),
         });

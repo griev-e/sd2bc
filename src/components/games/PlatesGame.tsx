@@ -138,7 +138,7 @@ function PlateGrid({
                 ? {
                     background: colorFor(claim.by),
                     borderColor: "transparent",
-                    color: "#fff",
+                    color: "var(--on-strong)",
                   }
                 : { borderColor: "var(--hairline)", color: "var(--fg-muted)" }
             }

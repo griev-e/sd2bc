@@ -11,11 +11,12 @@ import SuggestSheet from "@/components/SuggestSheet";
 import Sheet from "@/components/Sheet";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
-import { fmtDuration, fmtMiles } from "@/lib/format";
+import { fmtClock, fmtDuration, fmtMiles, localDateISO } from "@/lib/format";
 import type { LngLat } from "@/lib/geo";
 import { reverseGeocode } from "@/lib/geocode";
 import { FADE, riseIn } from "@/lib/motion";
-import { stopsForDay, useTrip } from "@/lib/store";
+import { useSchedule } from "@/lib/schedule";
+import { stopsForDay, useOrderedDays, useTrip } from "@/lib/store";
 import { useWeather, weatherKind, WEATHER_LABEL } from "@/lib/weather";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
@@ -28,7 +29,6 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 });
 
 export default function MapPage() {
-  const days = useTrip((s) => s.days);
   const stops = useTrip((s) => s.stops);
   const routes = useTrip((s) => s.routes);
   const routesPending = useTrip((s) => s.routesPending);
@@ -44,8 +44,25 @@ export default function MapPage() {
   const [pendingPin, setPendingPin] = useState<{ lngLat: LngLat; name: string } | null>(null);
   const [pinDayId, setPinDayId] = useState<string | null>(null);
 
-  const orderedDays = useMemo(() => [...days].sort((a, b) => a.seq - b.seq), [days]);
+  const orderedDays = useOrderedDays();
   const selectedStop = stops.find((s) => s.id === selectedStopId) ?? null;
+  const schedule = useSchedule();
+
+  // Today mode: while the trip is underway, surface the next stop still ahead
+  // of the clock so the map opens straight into "what's next". Plain
+  // per-render code (no useMemo): it reads the clock, and it's cheap.
+  const todayNext = (() => {
+    const now = new Date();
+    const today = orderedDays.find((d) => d.date === localDateISO(now));
+    if (!today) return null;
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    for (const s of stopsForDay(stops, today.id)) {
+      const sched = schedule.get(s.id);
+      // a 15-minute grace keeps the current stop visible while you're at it
+      if (sched && sched.departMin >= nowMin - 15) return { stop: s, sched };
+    }
+    return null;
+  })();
   const byCluster = useWeather((s) => s.byCluster);
   // The tapped stop's own cluster forecast — same reading as its map badge, so
   // the card never describes a different place than the pin you touched.
@@ -124,6 +141,21 @@ export default function MapPage() {
             </button>
           ))}
         </div>
+
+        {/* today's next stop — tap to fly to it */}
+        {todayNext && (
+          <div className="pointer-events-none mx-auto mt-2 flex max-w-md justify-center px-4">
+            <button
+              onClick={() => setSelectedStop(todayNext.stop.id)}
+              className="glass pressable pointer-events-auto max-w-full truncate rounded-full px-3.5 py-1.5 text-xs text-fg-muted"
+            >
+              <span className="font-semibold text-accent">Today</span>
+              {" · next "}
+              <span className="font-semibold text-fg">{todayNext.stop.name}</span>
+              <span className="tnum"> ~{fmtClock(todayNext.sched.arrivalMin)}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {routeError && (

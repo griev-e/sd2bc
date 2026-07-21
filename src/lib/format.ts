@@ -65,6 +65,23 @@ export function fmtStay(minutes: number): string {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
+/**
+ * A pasted link, made safe to render as an href: only http(s) URLs pass
+ * (never javascript: etc.), and a bare "expedia.com/…" gets https:// added.
+ * Returns null when it can't be a web link.
+ */
+export function safeHttpUrl(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Preferred short name for a traveler: display name, else username. */
 export function displayName(
   p: { display_name: string | null; username: string } | null | undefined,

@@ -77,6 +77,11 @@ src/
 | `types.ts` | Every DB row + computed type. The schema-of-record for the client. |
 | `config.ts` | All external endpoints + Supabase credentials. |
 | `supabase.ts` | Browser Supabase singleton; `usernameToEmail()`. |
+| `outbox.ts` | Offline write queue: network-failed mutations park here (optimistic state kept) and replay FIFO on reconnect. |
+| `budget.ts` | `computeBudget()` — the whole cost forecast as one pure function, shared by the Budget tab and the AI analyzer. |
+| `directions.ts` | Keyless Google Maps directions deep link for a day's drive. |
+| `ics.ts` | Client-side iCalendar export of the itinerary (one all-day event per day). |
+| `server/auth.ts` | Server-only `verifyTraveler()` — Bearer-token gate for `/api/analyze` and `/api/overpass`. |
 | `osrm.ts` | `fetchRoute()` with memory → Supabase `route_cache` → network. |
 | `overpass.ts` | POI suggestions along a route corridor (Overpass/QLever, cached). |
 | `geo.ts` | Pure geometry: haversine, point-to-polyline, region-by-latitude, `hashKey`. |
@@ -101,10 +106,13 @@ Entities: `profiles`, `trip`, `days`, `stops`, `viaPoints`, `packing`,
 Conventions every mutation follows — **match these when adding one**:
 
 - **Optimistic writes.** Update local state first (inserts use a
-  client-generated `crypto.randomUUID()` id), then persist to Supabase. **On
-  error, roll back** the optimistic change — inserts remove the row, updates
-  and deletes restore the captured previous row. Realtime will reconcile the
-  authoritative row.
+  client-generated `crypto.randomUUID()` id), then persist to Supabase
+  **through the store's `runWrite()` helper**. On a server rejection
+  (`"error"`), roll back the optimistic change — inserts remove the row,
+  updates restore only the fields the patch touched. On a dead connection,
+  `runWrite` instead queues the op in the **outbox** (`lib/outbox.ts`), keeps
+  the optimistic state, and surfaces the store `toast`; the queue replays on
+  reconnect. Realtime will reconcile the authoritative row either way.
 - **Realtime is the reconciler.** One channel (`coastline-sync`) subscribes to
   `postgres_changes` on every shared table and funnels through `applyChange()`,
   which upserts by `id`. Any table you sync must be added to the `tables` list
@@ -182,9 +190,14 @@ Two accounts, hard-capped. Two sign-in paths, both landing in Supabase Auth:
    redeems with `verifyOtp`. This route uses the **Supabase secret key** and is
    the one place server-only secrets are required.
 
-All data access is gated by **Row Level Security** (authenticated role only) —
-the app is a private two-person workspace. The anon/publishable key is meant to
-ship in the client bundle.
+All data access is gated by **Row Level Security** via the
+`public.is_traveler()` function — every policy requires the caller's
+`auth.uid()` to exist in `profiles`, so even a stray Supabase account created
+with the public anon key sees nothing. The anon/publishable key is meant to
+ship in the client bundle. `/api/analyze` and `/api/overpass` are gated the
+same way server-side (`verifyTraveler()` in `lib/server/auth.ts` — clients
+send their session token as a Bearer header). `/api/pin-login` rate-limits
+guesses through the `pin_attempts` table (service-role only).
 
 ## Environment variables
 

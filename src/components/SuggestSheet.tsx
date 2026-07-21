@@ -38,6 +38,23 @@ function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * Seed the new stop's notes with the useful OSM metadata the card can't show —
+ * otherwise cuisine/stars/website are simply thrown away on "Add to day".
+ */
+function enrichmentNotes(s: Suggestion): string | undefined {
+  const bits: string[] = [];
+  if (s.tags.cuisine) {
+    bits.push(s.tags.cuisine.split(";").slice(0, 3).map(titleCase).join(", "));
+  }
+  const stars = parseInt(s.tags.stars ?? "", 10);
+  if (stars > 0) bits.push(`${Math.min(stars, 5)}★`);
+  if (s.tags.brand) bits.push(s.tags.brand);
+  if (s.tags.website) bits.push(s.tags.website);
+  if (s.tags.wikipedia) bits.push(`Wikipedia: ${s.tags.wikipedia}`);
+  return bits.length > 0 ? `From OpenStreetMap: ${bits.join(" · ")}` : undefined;
+}
+
 /** One-line descriptor pulled from OSM tags: cuisine, stars, type, or brand. */
 function detailFor(s: Suggestion): string | null {
   const t = s.tags;
@@ -228,6 +245,7 @@ function Results({
                     lat: s.lat,
                     lng: s.lng,
                     kind: KIND_FOR_CATEGORY[s.category],
+                    notes: enrichmentNotes(s),
                   });
                   setAdded(new Set(added).add(s.id));
                 }}

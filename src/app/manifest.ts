@@ -8,7 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/",
     display: "standalone",
     background_color: "#0a0f13",
-    theme_color: "#0e9488",
+    // mirrors --accent (light) in globals.css
+    theme_color: "#0d9488",
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyTraveler } from "@/lib/server/auth";
 
 /**
  * Server-side proxy for Overpass. The public instances reject requests
@@ -6,6 +7,9 @@ import { NextRequest, NextResponse } from "next/server";
  * mirror can be arbitrarily slow — so requests are *hedged*: the first
  * mirror starts immediately and the others join staggered a few seconds
  * apart. First good answer wins, the rest are aborted.
+ *
+ * Traveler-gated: an open relay here would let anyone burn the public
+ * mirrors' goodwill (and our User-Agent's reputation) from our URL.
  */
 export const maxDuration = 60;
 
@@ -37,6 +41,11 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await verifyTraveler(req);
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   let query: unknown;
   try {
     ({ query } = await req.json());

@@ -379,12 +379,18 @@ async function fetchViaOverpass(
   const query = `[out:json][timeout:30];(${filters});out center 80;`;
 
   // proxied through our own API route — Overpass rejects browser requests
-  // that can't send a descriptive User-Agent
+  // that can't send a descriptive User-Agent. The proxy is traveler-gated,
+  // so the session token rides along.
   // give up client-side after 50s so the UI can offer a retry instead of
   // spinning forever
+  const { data: sess } = await supabase().auth.getSession();
+  const token = sess.session?.access_token;
   const res = await fetch(OVERPASS_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({ query }),
     signal: AbortSignal.timeout(50000),
   });

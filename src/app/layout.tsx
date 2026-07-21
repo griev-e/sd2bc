@@ -37,8 +37,10 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
+  // no maximumScale: capping it blocks pinch-zooming text (accessibility);
+  // iOS ignores the cap anyway and the map handles its own gestures
   viewportFit: "cover",
+  // hexes mirror --bg values in globals.css (meta tags can't read CSS vars)
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f4f6f7" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0f13" },
