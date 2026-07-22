@@ -29,7 +29,7 @@ import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
-import { directionsUrl } from "@/lib/directions";
+import { directionsOptions, type NavOption } from "@/lib/directions";
 import { FADE, riseIn, SPRING } from "@/lib/motion";
 import { dayEmoji, NATURE_EMOJI } from "@/lib/emoji";
 import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
@@ -151,6 +151,7 @@ function DayCard({
   const deleteDay = useTrip((s) => s.deleteDay);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const setSelectedDay = useTrip((s) => s.setSelectedDay);
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
 
@@ -189,9 +190,9 @@ function DayCard({
     return route.segments.find((s) => s.toStopId === dayStops[0].id) ?? null;
   }, [route, dayStops]);
 
-  // Hand this day's drive to Google Maps: last night's stay (if any) through
-  // every stop in order. Keyless universal URL — see lib/directions.
-  const navUrl = useMemo(() => {
+  // Hand this day's drive to a nav app: last night's stay (if any) through
+  // every stop in order. One keyless universal link per app — see lib/directions.
+  const navOptions = useMemo(() => {
     const points: LngLat[] = [];
     if (prevDay) {
       const prevStops = stopsForDay(stops, prevDay.id);
@@ -199,7 +200,7 @@ function DayCard({
       if (origin) points.push([origin.lng, origin.lat]);
     }
     for (const s of dayStops) points.push([s.lng, s.lat]);
-    return directionsUrl(points);
+    return directionsOptions(points);
   }, [prevDay, stops, dayStops]);
 
   // When the day's first stop has an ETA, back out when to leave last night's
@@ -341,16 +342,14 @@ function DayCard({
         >
           <IconSparkle size={13} /> Suggest nearby
         </button>
-        {navUrl && (
-          <a
-            href={navUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Navigate day ${day.seq} in Google Maps`}
+        {navOptions.length > 0 && (
+          <button
+            onClick={() => setNavOpen(true)}
+            aria-label={`Navigate day ${day.seq}`}
             className="btn-ghost pressable flex min-h-[38px] w-10 flex-shrink-0 items-center justify-center rounded-xl !text-fg-faint"
           >
             <IconPin size={14} />
-          </a>
+          </button>
         )}
         <button
           onClick={() => {
@@ -380,7 +379,50 @@ function DayCard({
       </div>
 
       <DayEmojiSheet day={day} open={emojiOpen} onClose={() => setEmojiOpen(false)} />
+      <NavAppSheet
+        day={day}
+        options={navOptions}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+      />
     </motion.section>
+  );
+}
+
+/** Bottom sheet to pick which navigation app opens this day's drive. */
+function NavAppSheet({
+  day,
+  options,
+  open,
+  onClose,
+}: {
+  day: Day;
+  options: NavOption[];
+  open: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Sheet open={open} onClose={onClose} title={`Navigate ${day.title || `Day ${day.seq}`}`}>
+      <div className="flex flex-col gap-2">
+        {options.map((opt) => (
+          <a
+            key={opt.provider}
+            href={opt.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onClose}
+            className="pressable flex items-center gap-3 rounded-xl bg-fg/[0.03] px-4 py-3.5 text-sm font-semibold"
+          >
+            <IconPin size={16} className="text-fg-faint" />
+            {opt.label}
+          </a>
+        ))}
+      </div>
+      <p className="mt-3 px-1 text-[11px] leading-relaxed text-fg-faint">
+        Google Maps follows every stop in order. Apple Maps chains the stops too;
+        Waze navigates to the last stop from where you are.
+      </p>
+    </Sheet>
   );
 }
 
