@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Sheet from "./Sheet";
 import AttributionDot from "./Attribution";
+import CheckPill from "./CheckPill";
 import { StopKindIcon } from "./CategoryIcon";
 import { IconLink, IconPin, IconX } from "./Icons";
 import { KIND_COLOR } from "@/lib/colors";
@@ -209,14 +210,12 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
 
       <label className="card flex min-h-[52px] items-center justify-between rounded-2xl px-4 py-3">
         <span className="text-sm font-medium">Overnight stay</span>
-        <input
-          type="checkbox"
-          className="check-pill"
+        <CheckPill
           checked={stop.is_overnight}
-          onChange={(e) =>
+          onChange={(checked) =>
             void updateStop(stop.id, {
-              is_overnight: e.target.checked,
-              kind: e.target.checked ? "lodging" : stop.kind,
+              is_overnight: checked,
+              kind: checked ? "lodging" : stop.kind,
             })
           }
         />
@@ -230,11 +229,9 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
               <span className="block text-sm font-medium">Free stay</span>
               <span className="text-xs text-fg-faint">Family or friends — $0 in the budget</span>
             </span>
-            <input
-              type="checkbox"
-              className="check-pill"
+            <CheckPill
               checked={stop.lodging_free}
-              onChange={(e) => void updateStop(stop.id, { lodging_free: e.target.checked })}
+              onChange={(checked) => void updateStop(stop.id, { lodging_free: checked })}
             />
           </label>
 

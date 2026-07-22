@@ -35,9 +35,16 @@ export default function BottomNav() {
                   className="absolute inset-0 rounded-xl bg-accent-soft"
                 />
               )}
-              <span className="relative">
+              {/* keyframes retrigger only when `active` flips on; initial={false}
+                  keeps the landing tab still on first paint */}
+              <motion.span
+                className="relative"
+                initial={false}
+                animate={active ? { scale: [1, 1.18, 1] } : { scale: 1 }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+              >
                 <Icon active={active} />
-              </span>
+              </motion.span>
               <span
                 className={`relative text-[9.5px] font-semibold tracking-wide transition-colors duration-200 ${
                   active ? "text-accent" : "text-fg-faint"

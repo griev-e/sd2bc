@@ -21,6 +21,13 @@ import type { Transition } from "motion/react";
 /** Movement & layout changes — quick, settles without overshoot. */
 export const SPRING: Transition = { type: "spring", stiffness: 520, damping: 44 };
 
+/**
+ * Value springs (count-ups, synced meters) — softer than SPRING so a number
+ * visibly ticks through intermediate values instead of arriving at once.
+ * Shaped for `useSpring(motionValue, …)`, not for a `transition` prop.
+ */
+export const SPRING_VALUE = { stiffness: 170, damping: 28 };
+
 /** Bottom sheets — a touch softer so the surface feels weighty. */
 export const SPRING_SHEET: Transition = { type: "spring", stiffness: 320, damping: 30 };
 
