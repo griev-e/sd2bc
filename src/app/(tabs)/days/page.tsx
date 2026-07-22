@@ -20,6 +20,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import AddStopSheet from "@/components/AddStopSheet";
+import { RollingText } from "@/components/AnimatedNumber";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
@@ -118,7 +119,10 @@ export default function DaysPage() {
 function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div>
-      <p className="mono text-[13px] font-semibold leading-tight">{value}</p>
+      {/* rolls changed digits when routes recompute — see AnimatedNumber */}
+      <p className="mono text-[13px] font-semibold leading-tight">
+        <RollingText value={value} />
+      </p>
       <p className="eyebrow mt-0.5">{label}</p>
     </div>
   );
@@ -369,8 +373,10 @@ function DayCard({
           <motion.span
             key={String(confirmDelete)}
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={FADE}
+            // arming gives a short sideways wiggle so the state change
+            // registers without reading the label
+            animate={confirmDelete ? { opacity: 1, x: [0, -3, 3, -2, 2, 0] } : { opacity: 1 }}
+            transition={confirmDelete ? { duration: 0.35, ease: "easeOut" } : FADE}
             className="flex items-center"
           >
             {confirmDelete ? "Sure?" : <IconTrash size={14} />}

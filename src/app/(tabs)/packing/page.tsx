@@ -1,8 +1,15 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
-import { useMemo, useState } from "react";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  useSpring,
+  useTransform,
+} from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AttributionDot from "@/components/Attribution";
+import CheckPill from "@/components/CheckPill";
 import CountdownPill from "@/components/CountdownPill";
 import { IconPlus, IconX } from "@/components/Icons";
 import Sheet from "@/components/Sheet";
@@ -63,6 +70,26 @@ export default function PackingPage() {
   );
 
   const done = packing.filter((p) => p.checked).length;
+  const pct = packing.length ? done / packing.length : 0;
+
+  // One spring drives both the bar and the "67%" label so they move together
+  // (MotionValue springs bypass MotionConfig, hence the explicit jump).
+  const reduced = useReducedMotion();
+  const pctSpring = useSpring(pct, { stiffness: 520, damping: 44 }); // SPRING's params
+  useEffect(() => {
+    if (reduced) pctSpring.jump(pct);
+    else pctSpring.set(pct);
+  }, [pct, reduced, pctSpring]);
+  const pctText = useTransform(pctSpring, (v) => `${Math.round(v * 100)}%`);
+
+  // One celebratory gradient sweep when packing crosses into 100% — only on a
+  // live crossing, never just because the page loaded already complete.
+  const prevPct = useRef(pct);
+  const [sweep, setSweep] = useState(false);
+  useEffect(() => {
+    if (pct === 1 && prevPct.current < 1) setSweep(true);
+    prevPct.current = pct;
+  }, [pct]);
 
   return (
     <div className="min-h-dvh pb-32">
@@ -78,19 +105,31 @@ export default function PackingPage() {
             <CountdownPill />
           </div>
           <div className="mt-2.5 flex items-center gap-3">
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fg/5">
+            <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-fg/5">
               {/* scaleX instead of width — transform-only, springs smoothly */}
               <motion.div
-                initial={false}
-                animate={{ scaleX: packing.length ? done / packing.length : 0 }}
-                transition={SPRING}
                 className="h-full w-full origin-left rounded-full"
-                style={{ background: "var(--accent-gradient)" }}
+                style={{ scaleX: pctSpring, background: "var(--accent-gradient)" }}
               />
+              <AnimatePresence>
+                {sweep && (
+                  <motion.div
+                    initial={{ x: "-100%" }}
+                    animate={{ x: "100%" }}
+                    transition={{ duration: 0.9, ease: "easeInOut", delay: 0.25 }}
+                    onAnimationComplete={() => setSweep(false)}
+                    className="absolute inset-0"
+                    style={{
+                      background:
+                        "linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.6) 50%, transparent 70%)",
+                    }}
+                  />
+                )}
+              </AnimatePresence>
             </div>
-            <span className="mono text-xs font-semibold text-fg-muted">
-              {packing.length ? Math.round((done / packing.length) * 100) : 0}%
-            </span>
+            <motion.span className="mono text-xs font-semibold text-fg-muted">
+              {pctText}
+            </motion.span>
           </div>
         </div>
       </header>
@@ -165,18 +204,27 @@ export default function PackingPage() {
                     transition={{ ...FADE, layout: SPRING }}
                     className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-xl px-1.5 py-1 active:bg-fg/5"
                   >
-                    <input
-                      type="checkbox"
-                      className="check-pill"
+                    <CheckPill
                       checked={item.checked}
-                      onChange={(e) => void togglePacking(item.id, e.target.checked)}
+                      onChange={(checked) => void togglePacking(item.id, checked)}
                     />
                     <span
-                      className={`flex-1 text-sm ${
-                        item.checked ? "text-fg-faint line-through" : "font-medium"
+                      className={`flex-1 text-sm transition-colors duration-200 ${
+                        item.checked ? "text-fg-faint" : "font-medium"
                       }`}
                     >
-                      {item.label}
+                      {/* strike-through sweeps across the label instead of
+                          appearing — sized by this inner span, not the flex cell */}
+                      <span className="relative">
+                        {item.label}
+                        <motion.span
+                          aria-hidden
+                          initial={false}
+                          animate={{ scaleX: item.checked ? 1 : 0 }}
+                          transition={{ duration: 0.25, ease: "easeOut" }}
+                          className="absolute inset-x-0 top-1/2 h-px origin-left bg-current"
+                        />
+                      </span>
                     </span>
                     {item.assigned_to && (
                       <span className="rounded-full border border-hairline px-2 py-0.5 text-[10px] font-medium text-fg-muted">
@@ -220,13 +268,19 @@ export default function PackingPage() {
         </div>
       </div>
 
-      <button
+      {/* Motion owns this button's transform (entrance + press), so no
+          .pressable — its :active transform would be overridden anyway */}
+      <motion.button
         onClick={() => setAddOpen(true)}
         aria-label="Add item"
-        className="btn-primary pressable fixed bottom-[calc(env(safe-area-inset-bottom)+84px)] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-2xl"
+        initial={{ opacity: 0, scale: 0.5 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ ...SPRING, delay: 0.15 }}
+        whileTap={{ scale: 0.88 }}
+        className="btn-primary fixed bottom-[calc(env(safe-area-inset-bottom)+84px)] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-2xl"
       >
         <IconPlus size={20} />
-      </button>
+      </motion.button>
 
       <Sheet open={addOpen} onClose={() => setAddOpen(false)} title="Add item">
         <div className="space-y-4">

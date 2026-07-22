@@ -395,6 +395,25 @@ body {
      the pin ease behind the map (a visible jiggle when panning fast). Animate
      the selection highlight via box-shadow instead, which MapLibre never touches. */
   transition: box-shadow 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Entrance pop animates the standalone `scale` property, which composes
+     with the `transform` MapLibre rewrites every frame — a transform keyframe
+     here would override the positioning and fling the pin to the corner.
+     fill-mode backwards keeps a pin invisible through its stagger delay
+     (MapView sets animation-delay per pin in stop order). */
+  animation: marker-pop 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes marker-pop {
+  0% {
+    scale: 0.4;
+    opacity: 0;
+  }
+  70% {
+    scale: 1.1;
+  }
+  100% {
+    scale: 1;
+    opacity: 1;
+  }
 }
 .stop-marker.selected {
   /* A scale() here would be overwritten by MapLibre's positioning transform, so
@@ -404,6 +423,39 @@ body {
     0 0 0 3px var(--accent),
     0 2px 10px rgba(0, 0, 0, 0.4);
   z-index: 5;
+}
+/* one soft expanding ring each time a pin becomes selected — on a pseudo-
+   element, so MapLibre's positioning transform is never touched; `forwards`
+   leaves it faded out */
+.stop-marker.selected::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 13px;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  animation: marker-pulse 0.5s ease-out forwards;
+}
+@keyframes marker-pulse {
+  from {
+    scale: 1;
+    opacity: 0.9;
+  }
+  to {
+    scale: 1.7;
+    opacity: 0;
+  }
+}
+/* after the marker rules on purpose — same specificity, so source order
+   decides, and these must win for reduced-motion users */
+@media (prefers-reduced-motion: reduce) {
+  .stop-marker {
+    animation: none;
+  }
+  .stop-marker.selected::before {
+    animation: none;
+    opacity: 0;
+  }
 }
 .stop-marker.overnight::after {
   content: "";
@@ -489,14 +541,7 @@ input[type="checkbox"].check-pill:checked {
   background: var(--accent-gradient);
   border-color: transparent;
 }
-input[type="checkbox"].check-pill:checked::after {
-  content: "";
-  width: 6px;
-  height: 10px;
-  border: solid var(--accent-contrast);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg) translateY(-1px);
-}
+/* the check mark itself is an animated SVG stroke — see components/CheckPill */
 
 /* Masked PIN entry that is deliberately NOT type="password" — masking via
    CSS keeps iOS passkey / password-manager prompts away. */

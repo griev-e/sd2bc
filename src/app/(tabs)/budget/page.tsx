@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
+import { AnimatedMoney, RollingText } from "@/components/AnimatedNumber";
 import CountdownPill from "@/components/CountdownPill";
 import { ExpenseCategoryIcon } from "@/components/CategoryIcon";
 import TripAnalyzer from "@/components/TripAnalyzer";
@@ -85,22 +86,28 @@ export default function BudgetPage() {
             }}
           />
           <p className="eyebrow">Estimated trip total</p>
-          <p className="display tnum mt-2 text-[46px] leading-none">{fmtMoney(total)}</p>
+          <p className="display tnum mt-2 text-[46px] leading-none">
+            <AnimatedMoney value={total} />
+          </p>
           <div className="stat-strip mt-5">
             <span>
               <span className="mono block text-[13px] font-semibold">
-                {totalMiles > 0 ? fmtMiles(totalMiles * M_PER_MI) : "—"}
+                <RollingText
+                  value={totalMiles > 0 ? fmtMiles(totalMiles * M_PER_MI) : "—"}
+                />
               </span>
               <span className="eyebrow mt-0.5 block">route</span>
             </span>
             <span>
               <span className="mono block text-[13px] font-semibold">
-                {fmtMoney(total / Math.max(1, days.length))}
+                <RollingText value={fmtMoney(total / Math.max(1, days.length))} />
               </span>
               <span className="eyebrow mt-0.5 block">per day</span>
             </span>
             <span>
-              <span className="mono block text-[13px] font-semibold">{days.length}</span>
+              <span className="mono block text-[13px] font-semibold">
+                <RollingText value={String(days.length)} />
+              </span>
               <span className="eyebrow mt-0.5 block">days</span>
             </span>
           </div>
@@ -108,7 +115,7 @@ export default function BudgetPage() {
 
         {/* per-category breakdown — tap a row for the math + daily trend */}
         <motion.section {...riseIn(1)} className="card p-2">
-          {CATEGORIES.map((c) => {
+          {CATEGORIES.map((c, ci) => {
             const color = EXPENSE_COLOR[c];
             const open = openCat === c;
             return (
@@ -125,15 +132,21 @@ export default function BudgetPage() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold">{CATEGORY_LABEL[c]}</span>
-                    {/* uniform full-width bar per row — consistent, easy to scan */}
+                    {/* uniform full-width bar per row — consistent, easy to scan;
+                        fills left-to-right on first reveal, one row after another */}
                     <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full">
-                      <span
-                        className="block h-full rounded-full"
+                      <motion.span
+                        initial={{ scaleX: 0 }}
+                        animate={{ scaleX: 1 }}
+                        transition={{ duration: 0.5, ease: "easeOut", delay: 0.2 + ci * 0.07 }}
+                        className="block h-full origin-left rounded-full"
                         style={{ background: color.fg }}
                       />
                     </span>
                   </span>
-                  <span className="tnum text-sm font-semibold">{fmtMoney(estimates[c])}</span>
+                  <span className="tnum text-sm font-semibold">
+                    <AnimatedMoney value={estimates[c]} />
+                  </span>
                   <motion.span
                     animate={{ rotate: open ? 180 : 0 }}
                     transition={SPRING}
@@ -156,7 +169,12 @@ export default function BudgetPage() {
                       className="overflow-hidden"
                     >
                       <div className="px-3 pb-3.5 pt-1">
-                        <p className="text-[11px] leading-4 text-fg-muted">{assumption[c]}</p>
+                        {/* the revealed content arrives in two beats behind the
+                            height animation so the open feels layered */}
+                        <motion.p {...riseIn(1)} className="text-[11px] leading-4 text-fg-muted">
+                          {assumption[c]}
+                        </motion.p>
+                        <motion.div {...riseIn(2)}>
                         {c === "food" || c === "activities" ? (
                           <RateEditor
                             value={c === "food" ? seed.foodPerDay : seed.activitiesPerDay}
@@ -177,6 +195,7 @@ export default function BudgetPage() {
                             average={estimates[c] / Math.max(1, orderedDays.length)}
                           />
                         )}
+                        </motion.div>
                       </div>
                     </motion.div>
                   )}
@@ -268,11 +287,14 @@ function TrendBars({
   return (
     <div className="mt-2.5">
       <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" role="img" aria-label="Estimated cost per day">
+        {/* bars rise from the baseline with a per-bar micro-stagger; scaleY
+            from the bar's own bottom (originY: 1 — Motion sets fill-box for
+            SVG), so no attribute animation and reduced-motion is honored */}
         {values.map((v, i) => {
           const h = Math.max(v > 0 ? 3 : 1.5, (v / max) * (H - PAD_TOP));
           const x = i * (bw + gap);
           return (
-            <rect
+            <motion.rect
               key={i}
               x={x}
               y={H - h}
@@ -281,11 +303,15 @@ function TrendBars({
               rx={Math.min(3, bw / 2)}
               fill={v > 0 ? color : "var(--hairline)"}
               opacity={v > 0 ? 0.9 : 1}
+              initial={{ scaleY: 0 }}
+              animate={{ scaleY: 1 }}
+              style={{ originY: 1 }}
+              transition={{ duration: 0.3, ease: "easeOut", delay: Math.min(i * 0.014, 0.25) }}
             />
           );
         })}
         {average > 0 && average < max && (
-          <line
+          <motion.line
             x1={0}
             x2={W}
             y1={avgY}
@@ -293,19 +319,25 @@ function TrendBars({
             stroke="var(--fg-faint)"
             strokeWidth={1}
             strokeDasharray="3 3"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.25, ease: "easeOut", delay: 0.3 }}
           />
         )}
         {/* direct label on the peak day only */}
-        <text
+        <motion.text
           x={Math.min(Math.max(peak * (bw + gap) + bw / 2, 16), W - 16)}
           y={Math.max(9, H - (values[peak] / max) * (H - PAD_TOP) - 4)}
           textAnchor="middle"
           fontSize={9}
           fill="var(--fg-muted)"
           className="tnum"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.25, ease: "easeOut", delay: 0.35 }}
         >
           {fmtMoney(values[peak])}
-        </text>
+        </motion.text>
       </svg>
       <div className="mt-1 flex justify-between">
         <span className="eyebrow">day 1</span>

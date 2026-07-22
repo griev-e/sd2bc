@@ -1,6 +1,11 @@
 "use client";
 
-import maplibregl, { Map as MLMap, Marker, type StyleSpecification } from "maplibre-gl";
+import maplibregl, {
+  Map as MLMap,
+  Marker,
+  type ExpressionSpecification,
+  type StyleSpecification,
+} from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
@@ -194,9 +199,15 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
 
   // ---- route layers ---------------------------------------------------------
-  useEffect(() => {
+  // While the draw-on sweep (below) animates a day, that day's static feature
+  // is held invisible — the overlay IS the line until the sweep finishes.
+  const drawAnim = useRef<{ dayId: string; raf: number } | null>(null);
+
+  // Effect event so the draw-on animation can re-sync with the *latest*
+  // routes/selection at any point (its rAF loop outlives the effect closure).
+  const syncRouteData = useEffectEvent(() => {
     const map = mapRef.current;
-    if (!map || !mapReady) return;
+    if (!map) return;
     const source = map.getSource("routes") as maplibregl.GeoJSONSource | undefined;
     if (!source) return;
     const features = orderedDays
@@ -204,13 +215,14 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         const route = routes[d.id];
         if (!route || route.coordinates.length < 2) return null;
         const dim = selectedDayId !== null && selectedDayId !== d.id;
+        const drawing = drawAnim.current?.dayId === d.id;
         return {
           type: "Feature" as const,
           geometry: { type: "LineString" as const, coordinates: route.coordinates },
           properties: {
             dayId: d.id,
             color: dayColor(i, orderedDays.length),
-            opacity: dim ? 0.18 : 0.95,
+            opacity: drawing ? 0 : dim ? 0.18 : 0.95,
           },
         };
       })
@@ -219,6 +231,11 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       type: "FeatureCollection",
       features: features as GeoJSON.Feature[],
     });
+  });
+
+  useEffect(() => {
+    if (!mapReady) return;
+    syncRouteData();
   }, [routes, selectedDayId, mapReady, orderedDays, styleEpoch]);
 
   // ---- street ⇄ satellite ---------------------------------------------------
@@ -255,6 +272,106 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     );
   }, [styleMode]);
 
+  // ---- selected-day draw-on -------------------------------------------------
+  // Selecting a day sweeps its route in from origin to destination (~700ms):
+  // a temporary lineMetrics source + two gradient-trimmed layers (casing +
+  // color, mirroring the static pair) animate on top while syncRouteData
+  // holds the static feature invisible, then everything swaps back in one
+  // frame. The gradient is a hard step at the draw front — interpolating to
+  // transparent would mix through darkened color.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const removeOverlay = () => {
+      if (map.getLayer("route-draw-line")) map.removeLayer("route-draw-line");
+      if (map.getLayer("route-draw-casing")) map.removeLayer("route-draw-casing");
+      if (map.getSource("route-draw")) map.removeSource("route-draw");
+    };
+
+    if (!selectedDayId) return;
+    const dayIndex = orderedDays.findIndex((d) => d.id === selectedDayId);
+    const route = routes[selectedDayId];
+    if (dayIndex === -1 || !route || route.coordinates.length < 2) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const color = dayColor(dayIndex, orderedDays.length);
+    const dark = effectiveDark();
+    const casing = styleMode === "satellite" ? "#ffffff" : dark ? "#0a0f13" : "#ffffff";
+    // progress < p → colored, beyond → transparent; p > 1 = fully drawn
+    const trim = (c: string, p: number): ExpressionSpecification => [
+      "step",
+      ["line-progress"],
+      c,
+      Math.max(p, Number.MIN_VALUE), // step stops must be > the previous one
+      "rgba(0, 0, 0, 0)",
+    ];
+
+    map.addSource("route-draw", {
+      type: "geojson",
+      lineMetrics: true, // line-progress needs this
+      data: {
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: route.coordinates },
+        properties: {},
+      },
+    });
+    map.addLayer({
+      id: "route-draw-casing",
+      type: "line",
+      source: "route-draw",
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-width": 7, "line-opacity": 0.95, "line-gradient": trim(casing, 0) },
+    });
+    map.addLayer({
+      id: "route-draw-line",
+      type: "line",
+      source: "route-draw",
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-width": 4, "line-opacity": 0.95, "line-gradient": trim(color, 0) },
+    });
+
+    drawAnim.current = { dayId: selectedDayId, raf: 0 };
+    syncRouteData(); // hide the static feature under the overlay
+
+    const DURATION = 700;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      // a style swap wipes the overlay mid-flight — stop and restore
+      if (!map.getLayer("route-draw-line")) {
+        drawAnim.current = null;
+        syncRouteData();
+        return;
+      }
+      const t = Math.min(1, (now - t0) / DURATION);
+      const p = 1 - Math.pow(1 - t, 3); // easeOutCubic
+      map.setPaintProperty("route-draw-line", "line-gradient", trim(color, p * 1.001));
+      map.setPaintProperty("route-draw-casing", "line-gradient", trim(casing, p * 1.001));
+      if (t < 1) {
+        drawAnim.current = { dayId: selectedDayId, raf: requestAnimationFrame(tick) };
+      } else {
+        // swap back in one task → the map repaints once, no double-draw
+        drawAnim.current = null;
+        syncRouteData();
+        removeOverlay();
+      }
+    };
+    drawAnim.current.raf = requestAnimationFrame(tick);
+
+    return () => {
+      // guard: on unmount the init effect's cleanup has already torn the map down
+      if (mapRef.current !== map) return;
+      if (drawAnim.current) {
+        cancelAnimationFrame(drawAnim.current.raf);
+        drawAnim.current = null;
+      }
+      removeOverlay();
+    };
+    // routes/orderedDays deliberately absent — a route recompute or day edit
+    // must not replay the sweep; the sync effect above keeps the data fresh
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDayId, mapReady, styleEpoch, styleMode]);
+
   // ---- stop markers (diffed in place — an edit to one stop must not tear
   // down and recreate every marker element on the map) ------------------------
   useEffect(() => {
@@ -268,8 +385,12 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         seen.add(stop.id);
         let entry = stopMarkers.current.get(stop.id);
         if (!entry) {
+          const el = document.createElement("div");
+          // cascade the pop-in (globals.css `marker-pop`) in stop order — set
+          // once at creation so later diff runs never replay the delay
+          el.style.animationDelay = `${Math.min(si, 12) * 30}ms`;
           entry = {
-            marker: new maplibregl.Marker({ element: document.createElement("div") })
+            marker: new maplibregl.Marker({ element: el })
               .setLngLat([stop.lng, stop.lat])
               .addTo(map),
             dayId: day.id,

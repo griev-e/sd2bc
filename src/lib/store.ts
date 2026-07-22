@@ -58,7 +58,7 @@ interface TripState {
   routeError: string | null;
 
   /** One-line status for the last write that failed or was queued offline. */
-  toast: { id: number; text: string } | null;
+  toast: { id: number; text: string; kind: "offline" | "error" } | null;
 
   // UI state shared between tabs
   selectedDayId: string | null;
@@ -282,8 +282,8 @@ export const useTrip = create<TripState>((set, get) => {
     routeTimer = setTimeout(() => void computeRoutes(), delay);
   }
 
-  function showToast(text: string) {
-    set({ toast: { id: ++toastSeq, text } });
+  function showToast(text: string, kind: "offline" | "error") {
+    set({ toast: { id: ++toastSeq, text, kind } });
   }
 
   /**
@@ -308,10 +308,10 @@ export const useTrip = create<TripState>((set, get) => {
       if (!error) return "ok";
       if (offline && isNetworkError(error)) {
         enqueueOutbox(offline);
-        showToast("Offline — saved on this phone, will sync.");
+        showToast("Offline — saved on this phone, will sync.", "offline");
         return "queued";
       }
-      showToast("Couldn't save that change.");
+      showToast("Couldn't save that change.", "error");
       return "error";
     } finally {
       pendingWrites--;
