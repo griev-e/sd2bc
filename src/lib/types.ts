@@ -162,7 +162,7 @@ export interface TripAnalysis {
   updated_at: string;
 }
 
-export type GameId = "plates" | "cars" | "roadside" | "words" | "fastfood";
+export type GameId = "plates" | "cars" | "roadside" | "words" | "fastfood" | "wordle";
 export type GameEventKind = "claim" | "entry" | "count" | "score";
 
 /** One row in the shared road-games event stream. */

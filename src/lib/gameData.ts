@@ -183,3 +183,67 @@ export const FASTFOOD_CHAINS: Chain[] = [
   { id: "timmys", name: "Tim Hortons" },
   { id: "aw", name: "A&W" },
 ];
+
+/**
+ * Wordle answer bank — 50 five-letter words that all touch our loop:
+ * the Pacific shoreline (San Diego → Carmel → Monterey → San Francisco →
+ * the redwoods → Portland → Seattle → Vancouver) and the drive itself.
+ * Every entry is exactly five letters and a common word, so guessing stays
+ * fair. Uppercase is the canonical form the game compares against.
+ *
+ * The game shuffles this bank and hides any word the crew has already solved
+ * (tracked as shared `game_events` claims keyed by the word), so no solved
+ * word comes back until every one is cleared.
+ */
+export const WORDLE_WORDS: string[] = [
+  "BEACH", // the whole coast, start to finish
+  "COAST",
+  "OCEAN",
+  "WAVES",
+  "SANDY",
+  "TIDES",
+  "CLIFF", // Big Sur's headlands
+  "WHALE", // Monterey Bay watching
+  "OTTER", // Monterey's sea otters
+  "SEALS",
+  "FERRY", // Puget Sound & the Vancouver crossing
+  "TRAIL",
+  "WOODS", // the redwoods
+  "CEDAR", // Pacific Northwest timber
+  "FERNS", // redwood understory
+  "GROVE", // a redwood grove
+  "TREES",
+  "RIVER",
+  "CREEK",
+  "PEAKS",
+  "VISTA", // the scenic pullouts
+  "BLUFF", // coastal bluffs
+  "FOGGY", // the marine layer
+  "RAINY", // Portland & Seattle
+  "SUNNY", // San Diego
+  "PALMS", // San Diego palm-lined streets
+  "TACOS", // San Diego staple
+  "LATTE", // Seattle/Portland coffee culture
+  "MOCHA",
+  "DINER", // roadside stops
+  "MOTEL",
+  "CABIN",
+  "TENTS", // camping the coast
+  "ROADS",
+  "MILES",
+  "DRIVE", // the point of the whole thing
+  "WHEEL",
+  "NORTH", // the outbound leg
+  "SOUTH", // the return leg
+  "MAPLE", // Vancouver / Canada
+  "BEARS",
+  "GULLS", // seagulls everywhere
+  "PINES",
+  "WHARF", // Monterey's & SF's Fisherman's Wharf
+  "DOCKS",
+  "CABLE", // San Francisco's cable cars
+  "HILLS", // San Francisco's hills
+  "BREAD", // SF sourdough
+  "WINES", // Carmel & the coastal wine country
+  "DUNES", // the Oregon coast dunes
+];
