@@ -8,14 +8,32 @@ import maplibregl, {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_SATELLITE } from "@/lib/config";
 import { IconLayers } from "./Icons";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor } from "@/lib/colors";
 import { bboxOf, type LngLat } from "@/lib/geo";
+import {
+  buildJourney,
+  getVehiclePref,
+  liveDistance,
+  positionAtDistance,
+  serverVehiclePref,
+  vehicleEmoji,
+  vehicleSubscribe,
+} from "@/lib/journey";
 import { FADE, riseIn } from "@/lib/motion";
 import { SUGGESTION_CATEGORIES } from "@/lib/overpass";
+import { useSchedule } from "@/lib/schedule";
 import { insertShapingPoint } from "@/lib/shaping";
 import { stopsForDay, useOrderedDays, useTrip } from "@/lib/store";
 import { useSuggestionPreview } from "@/lib/suggestionPreview";
@@ -118,6 +136,25 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
   const orderedDays = useOrderedDays();
 
+  // ---- journey vehicle (a marker that tracks the route by the clock) -------
+  // In "live" mode its distance along the route is derived from the real clock
+  // through the trip schedule (parked at the origin until departure day); the
+  // "drive it" control sweeps that distance start→finish to preview the loop.
+  const schedule = useSchedule();
+  const vehicleKey = useSyncExternalStore(vehicleSubscribe, getVehiclePref, serverVehiclePref);
+  const journey = useMemo(() => buildJourney(orderedDays, routes), [orderedDays, routes]);
+  // refs so the imperative positioner + rAF loop always read the latest values
+  // without re-subscribing every frame; kept current from effects (never
+  // written during render) so a mid-sim route recompute can't restart the sweep
+  const journeyRef = useRef(journey);
+  const emojiRef = useRef(vehicleEmoji(vehicleKey));
+  const journeyMarker = useRef<Marker | null>(null);
+  const [driving, setDriving] = useState(false);
+  const [simProgress, setSimProgress] = useState(0);
+  useEffect(() => {
+    journeyRef.current = journey;
+  }, [journey]);
+
   // ---- init ---------------------------------------------------------------
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -193,6 +230,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       sm.clear();
       vm.clear();
       wm.clear();
+      journeyMarker.current = null;
     };
      
   }, []);
@@ -535,6 +573,97 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viaPoints, mapReady, showVias]);
 
+  // ---- journey vehicle marker ---------------------------------------------------
+  // Positioned imperatively (direct setLngLat, never React state per frame) so
+  // the simulation's rAF sweep runs at 60fps without re-rendering this heavy
+  // component — the same discipline the draw-on route animation uses.
+  const positionMarker = useCallback((dist: number, live: boolean) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const j = journeyRef.current;
+    const pos = j.points.length > 0 ? positionAtDistance(j, dist) : null;
+    if (!pos) {
+      if (journeyMarker.current) {
+        journeyMarker.current.remove();
+        journeyMarker.current = null;
+      }
+      return;
+    }
+    if (!journeyMarker.current) {
+      const el = document.createElement("div");
+      el.className = "journey-marker";
+      el.textContent = emojiRef.current;
+      journeyMarker.current = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat(pos.lngLat)
+        .addTo(map);
+    } else {
+      journeyMarker.current.setLngLat(pos.lngLat);
+    }
+    const el = journeyMarker.current.getElement();
+    el.textContent = emojiRef.current;
+    el.classList.toggle("live", live);
+  }, []);
+
+  // live mode: park the marker where the clock puts us, refreshed on a slow
+  // cadence and whenever the route/plan changes. Suspended while simulating.
+  useEffect(() => {
+    if (!mapReady || driving) return;
+    const tick = () =>
+      positionMarker(liveDistance(journey, orderedDays, stops, schedule, new Date()), true);
+    tick();
+    const t = setInterval(tick, 30_000);
+    return () => clearInterval(t);
+  }, [mapReady, driving, journey, orderedDays, stops, schedule, positionMarker]);
+
+  // swap the emoji in place the instant the pick changes (no reposition)
+  useEffect(() => {
+    emojiRef.current = vehicleEmoji(vehicleKey);
+    const el = journeyMarker.current?.getElement();
+    if (el) el.textContent = emojiRef.current;
+  }, [vehicleKey]);
+
+  // "drive it": sweep the whole route start→finish (~28s), then hand the
+  // marker back to live mode.
+  useEffect(() => {
+    if (!driving) return;
+    const total = journeyRef.current.totalDist;
+    if (total <= 0) {
+      setDriving(false);
+      return;
+    }
+    // reduced motion: skip the sweep, just rest at the finish for a beat
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      positionMarker(total, false);
+      const raf = requestAnimationFrame(() => setSimProgress(1));
+      const to = setTimeout(() => setDriving(false), 900);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(to);
+      };
+    }
+    const DURATION = 28_000;
+    const t0 = performance.now();
+    let raf = 0;
+    let lastHud = 0;
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / DURATION);
+      positionMarker(p * total, false);
+      // throttle the HUD's React state to ~6fps; the marker moves every frame
+      if (now - lastHud > 160) {
+        setSimProgress(p);
+        lastHud = now;
+      }
+      if (p < 1) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        setSimProgress(1);
+        setTimeout(() => setDriving(false), 900);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [driving, positionMarker]);
+
   // ---- camera -------------------------------------------------------------------
   const fitTrip = useCallback(() => {
     const map = mapRef.current;
@@ -594,6 +723,13 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     }
   }, [mapReady, stops, fitTrip]);
 
+  // day the marker sits on while simulating — drives the progress HUD label
+  const simPos =
+    driving && journey.totalDist > 0
+      ? positionAtDistance(journey, simProgress * journey.totalDist)
+      : null;
+  const simDay = simPos && simPos.dayIndex >= 0 ? orderedDays[simPos.dayIndex] : null;
+
   return (
     <div className="absolute inset-0">
       <div ref={containerRef} className="h-full w-full" />
@@ -643,6 +779,61 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
           <circle cx="9" cy="5.5" r="2.4" fill="var(--bg-elevated)" stroke="currentColor" strokeWidth="1.7" />
         </svg>
       </button>
+
+      {/* drive the route — animate the vehicle along the whole loop */}
+      {journey.totalDist > 0 && (
+        <button
+          onClick={() => setDriving((d) => !d)}
+          aria-label={driving ? "Stop driving the route" : "Drive the route"}
+          className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+274px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
+            driving ? "text-accent" : "text-fg-muted"
+          }`}
+        >
+          {driving ? (
+            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden>
+              <rect x="3" y="2.5" width="3.3" height="11" rx="1" fill="currentColor" />
+              <rect x="9.7" y="2.5" width="3.3" height="11" rx="1" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden>
+              <path d="M4 2.7 13.2 8 4 13.3V2.7Z" fill="currentColor" />
+            </svg>
+          )}
+        </button>
+      )}
+
+      {/* journey progress HUD — only while the simulation is running */}
+      <AnimatePresence>
+        {driving && (
+          <motion.div
+            {...riseIn()}
+            exit={{ opacity: 0, y: 8, transition: FADE }}
+            className="pointer-events-none absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+150px)] z-10 flex justify-center px-4"
+          >
+            <div className="glass-strong flex items-center gap-2.5 rounded-full py-2 pl-3.5 pr-4">
+              <span className="text-lg leading-none">{vehicleEmoji(vehicleKey)}</span>
+              <div className="min-w-[128px]">
+                <p className="truncate text-[11px] font-semibold leading-tight">
+                  {simDay ? `Day ${simDay.seq}` : "On the road"}
+                  {simDay?.title ? ` · ${simDay.title}` : ""}
+                </p>
+                <div className="mt-1 h-1 overflow-hidden rounded-full bg-fg/10">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.round(simProgress * 100)}%`,
+                      background: "var(--accent-gradient)",
+                    }}
+                  />
+                </div>
+              </div>
+              <span className="tnum text-xs font-bold text-accent">
+                {Math.round(simProgress * 100)}%
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* shaping point delete pill */}
       <AnimatePresence>

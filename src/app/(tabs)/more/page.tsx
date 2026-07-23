@@ -7,6 +7,13 @@ import CountdownPill from "@/components/CountdownPill";
 import { IconCamera } from "@/components/Icons";
 import { displayName } from "@/lib/format";
 import { buildItineraryIcs } from "@/lib/ics";
+import {
+  getVehiclePref,
+  serverVehiclePref,
+  setVehiclePref,
+  VEHICLES,
+  vehicleSubscribe,
+} from "@/lib/journey";
 import { getSchedule } from "@/lib/schedule";
 import { useTrip } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
@@ -48,6 +55,7 @@ export default function MorePage() {
   }
   const theme = useSyncExternalStore(themeSubscribe, getThemePref, serverThemePref);
   const accent = useSyncExternalStore(themeSubscribe, getAccentPref, serverAccentPref);
+  const vehicle = useSyncExternalStore(vehicleSubscribe, getVehiclePref, serverVehiclePref);
 
   useEffect(() => {
     void refreshActivity();
@@ -124,6 +132,40 @@ export default function MorePage() {
           </div>
           <p className="mt-2.5 text-center text-[11px] text-fg-faint">
             {ACCENTS.find((a) => a.key === accent)?.label}
+          </p>
+        </section>
+
+        {/* map marker — the vehicle that rides the route */}
+        <section className="card p-5">
+          <p className="eyebrow mb-1">Map marker</p>
+          <p className="mb-3 text-xs leading-5 text-fg-muted">
+            The icon that rides the route on the map — parked at San Diego until
+            departure day, then tracking the drive by the clock. Tap ▶ on the map
+            to watch the whole loop play out. Set per phone.
+          </p>
+          <div className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 py-1">
+            {VEHICLES.map((v) => (
+              <button
+                key={v.key}
+                onClick={() => setVehiclePref(v.key)}
+                aria-label={v.label}
+                title={v.label}
+                className="pressable flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full text-2xl"
+                style={
+                  vehicle === v.key
+                    ? {
+                        background: "var(--accent-soft)",
+                        boxShadow: "0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--accent)",
+                      }
+                    : { background: "var(--glass)" }
+                }
+              >
+                {v.emoji}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2.5 text-center text-[11px] text-fg-faint">
+            {VEHICLES.find((v) => v.key === vehicle)?.label}
           </p>
         </section>
 

@@ -7,11 +7,13 @@ import CarsGame from "@/components/games/CarsGame";
 import FastFoodGame from "@/components/games/FastFoodGame";
 import PlatesGame from "@/components/games/PlatesGame";
 import RoadsideGame from "@/components/games/RoadsideGame";
+import WordleGame from "@/components/games/WordleGame";
 import WordRushGame from "@/components/games/WordRushGame";
 import { riseIn, SPRING } from "@/lib/motion";
 import type { GameId } from "@/lib/types";
 
 const GAMES: { id: GameId; label: string; blurb: string }[] = [
+  { id: "wordle", label: "Wordle", blurb: "Five letters, five tries — coastal edition" },
   { id: "plates", label: "Plates", blurb: "License-plate bingo — collect them together" },
   { id: "roadside", label: "I Spy", blurb: "Roadside scavenger hunt" },
   { id: "fastfood", label: "Chains", blurb: "Count your chain's sightings" },
@@ -20,7 +22,7 @@ const GAMES: { id: GameId; label: string; blurb: string }[] = [
 ];
 
 export default function GamesPage() {
-  const [active, setActive] = useState<GameId>("plates");
+  const [active, setActive] = useState<GameId>("wordle");
   const game = GAMES.find((g) => g.id === active)!;
 
   return (
@@ -63,6 +65,7 @@ export default function GamesPage() {
       {/* keyed by game — switching remounts the panel with a quick rise */}
       <motion.div key={active} {...riseIn()} className="px-4 pt-4">
         <p className="mb-3 px-1 text-[11px] text-fg-faint">{game.blurb} — synced live to both phones.</p>
+        {active === "wordle" && <WordleGame />}
         {active === "plates" && <PlatesGame />}
         {active === "roadside" && <RoadsideGame />}
         {active === "fastfood" && <FastFoodGame />}

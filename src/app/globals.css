@@ -726,3 +726,175 @@ input[type="checkbox"].check-pill:checked {
     --ring: rgba(52, 211, 153, 0.4);
   }
 }
+
+/* ---- wordle ------------------------------------------------------------
+   The three tile colors are deliberately the original game's palette (the
+   ask was "color coded like the original wordle"), with a dark-mode set so
+   the board reads on either theme. Keys reuse the same three. */
+:root {
+  --wl-correct: #6aaa64;
+  --wl-present: #c8992e;
+  --wl-absent: #8b8f94;
+  --wl-key: rgba(11, 18, 21, 0.06);
+}
+:root[data-theme="dark"] {
+  --wl-correct: #4f9d51;
+  --wl-present: #b59f3b;
+  --wl-absent: #3a3f45;
+  --wl-key: rgba(255, 255, 255, 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --wl-correct: #4f9d51;
+    --wl-present: #b59f3b;
+    --wl-absent: #3a3f45;
+    --wl-key: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.wordle-tile {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 2px solid var(--hairline);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--fg);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wordle-tile.filled {
+  border-color: var(--fg-faint);
+  animation: wordle-pop 0.12s ease;
+}
+.wordle-tile.revealed {
+  color: #fff;
+  border-color: transparent;
+  /* staggered per-column via inline animation-delay; `both` holds the tile
+     hidden at rotateX(90deg) only for the flip's own frames */
+  animation: wordle-flip 0.5s ease both;
+}
+.wordle-tile.wl-correct {
+  background: var(--wl-correct);
+}
+.wordle-tile.wl-present {
+  background: var(--wl-present);
+}
+.wordle-tile.wl-absent {
+  background: var(--wl-absent);
+}
+@keyframes wordle-pop {
+  0% {
+    transform: scale(0.86);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes wordle-flip {
+  0% {
+    transform: rotateX(0deg);
+  }
+  50% {
+    transform: rotateX(90deg);
+  }
+  100% {
+    transform: rotateX(0deg);
+  }
+}
+
+.wordle-key {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 52px;
+  border-radius: 8px;
+  border: none;
+  background: var(--wl-key);
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 700;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wordle-key-wide {
+  flex: 1.6 1 0;
+}
+.wordle-key.wl-correct {
+  background: var(--wl-correct);
+  color: #fff;
+}
+.wordle-key.wl-present {
+  background: var(--wl-present);
+  color: #fff;
+}
+.wordle-key.wl-absent {
+  background: var(--wl-absent);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordle-tile.filled,
+  .wordle-tile.revealed {
+    animation: none;
+  }
+}
+
+/* ---- journey marker (the vehicle that tracks the route by clock) --------
+   A glass puck carrying the chosen emoji. Like .stop-marker, overwriting the
+   element's className drops MapLibre's own class, so the positioning basics
+   are pinned here — MapLibre keeps rewriting the inline transform to track
+   the coordinate, so never transition `transform`. */
+.journey-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 3px 12px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px) saturate(1.5);
+  -webkit-backdrop-filter: blur(8px) saturate(1.5);
+  z-index: 4;
+  pointer-events: none;
+}
+/* soft ping while the trip is "live" (tracking the real clock) */
+.journey-marker.live::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: journey-ping 2.4s ease-out infinite;
+}
+@keyframes journey-ping {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .journey-marker.live::after {
+    animation: none;
+    opacity: 0;
+  }
+}
