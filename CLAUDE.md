@@ -93,6 +93,7 @@ src/
 | `clusters.ts` | Group nearby stops so forecasts aren't repeated. |
 | `shaping.ts` | Insert an invisible via/shaping point on a day's route. |
 | `analysis.ts` | AI trip analyzer client half: `analysisKey()` (cache key = hash of the itinerary + budget knobs) and `buildAnalysisPayload()` (the compact snapshot `/api/analyze` feeds to Claude). |
+| `plateRank.ts` | Beli-style license-plate rating: per-person ranking document (the latest `score` game event per author), sentiment buckets with fixed score bands, binary-insert duel math, positional 0–10 scores, combined leaderboard. Pure. |
 | `packingTags.ts` | Packing auto-tagging: `suggestCategory()` (learned-neighbor + curated-lexicon classifier with typo correction and a confidence score), `detectAssignee()`, `parsePackingEntries()`, `suggestRetags()`, plus the category palette/emoji. Pure and local — no network, no model. |
 | `theme.ts` | Light/dark/system preference, persisted per device. |
 | `motion.ts` | Shared Motion animation tokens (springs, fades, staggered rise). All structural animation (enter/exit, layout, sheets) uses Motion with these; micro feedback (`.pressable`, color transitions) stays CSS. `prefers-reduced-motion` is honored globally via `MotionProvider`. |
@@ -154,6 +155,11 @@ Rush) that share one append-only `game_events` table via `addGameEvent` /
 `deleteGameEvent`, following the same optimistic-write-then-Realtime-reconcile
 pattern as everything else. `GameId`/`GameEventKind` in `types.ts` and static
 content in `gameData.ts` are the source of truth for what each game shows.
+Plates additionally carries a Beli-style rater (`lib/plateRank.ts`,
+`games/PlateRater.tsx`): each traveler's whole plate ranking is one JSON
+document — their latest `score` event with key `"ranking"` — re-ranks append
+a fresh document and the writer deletes their older ones, so the two
+travelers' rankings are last-write-wins per person and never conflict.
 
 ## Free-service etiquette (do not regress this)
 
