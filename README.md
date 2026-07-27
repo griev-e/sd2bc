@@ -16,6 +16,11 @@ phones, progressive cost forecasting — built on entirely free, keyless service
 
 - **Map** — full-screen loop route, numbered squircle markers color-coded by day,
   day filter chips, fly-to camera moves.
+- **Live blip** — a real GPS dot (with its accuracy halo) for where the phone
+  actually is, off by default and never shared or stored. Tap ▶ and the route
+  simulation picks up from the point on the route closest to that blip and
+  drives the rest of the loop; with location off it falls back to where the
+  schedule says you'd be.
 - **Custom route shaping** — tap the route line to drop an invisible shaping
   point, drag it onto the road you want (Hwy 1 over I-5), OSRM re-routes through
   it. Tap the dot to remove. Shaping points never appear in the itinerary.
@@ -34,7 +39,11 @@ phones, progressive cost forecasting — built on entirely free, keyless service
   with no food or fuel stop. Results are cached in Supabase keyed by a hash of
   the trip state, so re-opens and the second phone never re-call the API.
 - **Packing** — pre-seeded shared checklist, assignment (me / her / shared),
-  attribution dots, live sync.
+  attribution dots, live sync. Items auto-tag as you type: a local classifier
+  reads the label ("sunscren", "kev's camera charger", a whole pasted list) and
+  picks the category — learning from how this list already files things,
+  falling back to a curated road-trip lexicon — plus a one-tap pass that
+  re-files anything sitting in the wrong section.
 - **Realtime** — every table syncs between both phones via Supabase Realtime
   with optimistic updates (last-write-wins).
 - **Two accounts max** — enforced in the signup edge function *and* a database

@@ -15,18 +15,45 @@ import { IconPlus, IconX } from "@/components/Icons";
 import Sheet from "@/components/Sheet";
 import { displayName } from "@/lib/format";
 import { FADE, riseIn, SPRING } from "@/lib/motion";
+import {
+  AUTO_TAG_THRESHOLD,
+  categoryMeta,
+  detectAssignee,
+  nameAliases,
+  OTHER_CATEGORY,
+  PACKING_CATEGORIES,
+  PARTNER_ALIASES,
+  parsePackingEntries,
+  SELF_ALIASES,
+  suggestCategory,
+  suggestRetags,
+  type TagPerson,
+} from "@/lib/packingTags";
 import { useTrip } from "@/lib/store";
+import type { PackingItem, Profile } from "@/lib/types";
 
 type AssignFilter = "all" | "me" | "partner" | "shared";
 
-const CATEGORY_DOT = [
-  "var(--accent)",
-  "var(--coral)",
-  "var(--gold)",
-  "var(--sky)",
-  "var(--violet)",
-  "var(--indigo)",
-];
+/** Small tinted tag chip — the same color the category's dot uses in the list. */
+function CategoryPill({ category }: { category: string }) {
+  const meta = categoryMeta(category);
+  return (
+    <span
+      className="inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+      style={{ background: meta.bg, color: meta.fg }}
+    >
+      <span aria-hidden>{meta.emoji}</span>
+      {category}
+    </span>
+  );
+}
+
+/** Names this person answers to in an item label: "Kev's charger", "my hat". */
+function aliasesFor(profile: Profile | null, pronouns: string[]): string[] {
+  // Longest first, so "kevin's" is consumed as a whole rather than as "kev".
+  const names = nameAliases(displayName(profile)).sort((a, b) => b.length - a.length);
+  return [...new Set([...names, ...pronouns])];
+}
 
 export default function PackingPage() {
   const packing = useTrip((s) => s.packing);
@@ -42,8 +69,13 @@ export default function PackingPage() {
   const [editMode, setEditMode] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
-  const [newCategory, setNewCategory] = useState("Clothes");
+  /** Manual category override — null means "whatever auto-tagging says". */
+  const [pinnedCategory, setPinnedCategory] = useState<string | null>(null);
   const [newAssign, setNewAssign] = useState<string | null>(null);
+  /** Same idea for the assignment: only pinned once it's been tapped. */
+  const [assignPinned, setAssignPinned] = useState(false);
+  const [tidyOpen, setTidyOpen] = useState(false);
+  const [tidySkipped, setTidySkipped] = useState<string[]>([]);
 
   const filtered = useMemo(() => {
     return packing.filter((p) => {
@@ -68,6 +100,99 @@ export default function PackingPage() {
     () => [...new Set(packing.map((p) => p.category))],
     [packing],
   );
+
+  const people = useMemo<TagPerson[]>(() => {
+    const me = profiles.find((p) => p.id === userId) ?? null;
+    const list: TagPerson[] = [];
+    if (userId) list.push({ id: userId, aliases: aliasesFor(me, SELF_ALIASES) });
+    if (partner) list.push({ id: partner.id, aliases: aliasesFor(partner, PARTNER_ALIASES) });
+    return list;
+  }, [profiles, userId, partner]);
+
+  /**
+   * What we'd add if you hit the button right now. One draft per typed entry
+   * (a pasted list splits into several), each with its own auto-tag and any
+   * owner read out of the text. Recomputed per keystroke — the classifier is
+   * pure and local, so that's free.
+   */
+  const drafts = useMemo(() => {
+    return parsePackingEntries(newLabel).map((entry) => {
+      const owned = detectAssignee(entry, people);
+      const suggestion = suggestCategory(owned.label, { items: packing, categories });
+      const auto =
+        suggestion.confidence >= AUTO_TAG_THRESHOLD ? suggestion.category : OTHER_CATEGORY;
+      return {
+        label: owned.label,
+        detectedAssignee: owned.assignedTo,
+        suggestion,
+        category: pinnedCategory ?? auto,
+      };
+    });
+  }, [newLabel, people, packing, categories, pinnedCategory]);
+
+  const lead = drafts[0] ?? null;
+  const assignTo = assignPinned ? newAssign : (lead?.detectedAssignee ?? null);
+  // With several drafts in flight each keeps its own tag, so no chip is lit
+  // unless you've pinned one — which applies to all of them.
+  const activeCategory = pinnedCategory ?? (drafts.length === 1 ? (lead?.category ?? null) : null);
+
+  /** Category chips: what we suggest, what the list already has, then the rest. */
+  const chipOptions = useMemo(() => {
+    const suggested = lead && lead.suggestion.confidence >= AUTO_TAG_THRESHOLD
+      ? [lead.suggestion.category]
+      : [];
+    return [...new Set([...suggested, ...categories, ...PACKING_CATEGORIES, OTHER_CATEGORY])];
+  }, [lead, categories]);
+
+  /**
+   * Items the classifier is confident are in the wrong section. Only computed
+   * while editing — it's a full pass over the list.
+   */
+  const retags = useMemo(
+    () => (editMode ? suggestRetags(packing).filter((r) => !tidySkipped.includes(r.item.id)) : []),
+    [editMode, packing, tidySkipped],
+  );
+
+  // Grow the entry field with a pasted list instead of hiding it behind a
+  // one-line scroll, up to a cap so the sheet never eats the keyboard.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 46), 132)}px`;
+  }, [newLabel, addOpen]);
+
+  const resetDraft = () => {
+    setNewLabel("");
+    setPinnedCategory(null);
+    setNewAssign(null);
+    setAssignPinned(false);
+  };
+
+  const commitDrafts = () => {
+    for (const draft of drafts) {
+      const owner = assignPinned ? newAssign : draft.detectedAssignee;
+      void addPackingItem(draft.category, draft.label, owner);
+    }
+    resetDraft();
+    setAddOpen(false);
+  };
+
+  /** Apply a batch of re-file proposals, giving each item a fresh tail `seq`. */
+  const applyRetags = (moves: { item: PackingItem; to: string }[]) => {
+    const tails = new Map<string, number>();
+    for (const item of packing) {
+      tails.set(item.category, Math.max(tails.get(item.category) ?? 0, item.seq));
+    }
+    for (const { item, to } of moves) {
+      // max + 1 within the destination, same rule the store uses on insert
+      const seq = (tails.get(to) ?? 0) + 1;
+      tails.set(to, seq);
+      void updatePackingItem(item.id, { category: to, seq });
+    }
+    setTidyOpen(false);
+  };
 
   const done = packing.filter((p) => p.checked).length;
   const pct = packing.length ? done / packing.length : 0;
@@ -163,7 +288,10 @@ export default function PackingPage() {
             </button>
           ))}
           <button
-            onClick={() => setEditMode(!editMode)}
+            onClick={() => {
+              if (!editMode) setTidySkipped([]); // a fresh pass each time
+              setEditMode(!editMode);
+            }}
             className={`pressable ml-auto flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold ${
               editMode ? "bg-fg text-bg" : "glass text-fg-muted"
             }`}
@@ -171,6 +299,28 @@ export default function PackingPage() {
             {editMode ? "Done" : "Edit"}
           </button>
         </div>
+
+        {/* Its own row rather than another filter pill — the pill row already
+            scrolls, and "Done" must never be pushed out of reach. */}
+        <AnimatePresence initial={false}>
+          {retags.length > 0 && (
+            <motion.button
+              key="tidy"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={FADE}
+              onClick={() => setTidyOpen(true)}
+              className="pressable mb-3 flex w-full items-center gap-2 rounded-2xl border border-hairline px-3.5 py-2.5"
+            >
+              <span aria-hidden>✨</span>
+              <span className="flex-1 text-left text-xs font-medium text-fg-muted">
+                {retags.length} {retags.length === 1 ? "item looks" : "items look"} mis-tagged
+              </span>
+              <span className="text-xs font-semibold text-accent">Review</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
 
         <div className="space-y-3.5">
           <AnimatePresence>
@@ -184,10 +334,13 @@ export default function PackingPage() {
               className="card p-4"
             >
               <p className="eyebrow mb-2 flex items-center gap-1.5 px-1">
+                {/* color and glyph come from what the category *means*, so
+                    "Bathroom" and "Toiletries" read as the same shelf */}
                 <span
                   className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: CATEGORY_DOT[gi % CATEGORY_DOT.length] }}
+                  style={{ background: categoryMeta(category).fg }}
                 />
+                <span aria-hidden>{categoryMeta(category).emoji}</span>
                 {category}
               </p>
               {/* popLayout: a deleted row pops out and fades while the rows
@@ -284,26 +437,86 @@ export default function PackingPage() {
 
       <Sheet open={addOpen} onClose={() => setAddOpen(false)} title="Add item">
         <div className="space-y-4">
-          <input
+          {/* textarea, not input: a pasted checklist keeps its line breaks and
+              becomes one row per line. Enter still means "add". */}
+          <textarea
+            ref={inputRef}
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
-            placeholder="What are we bringing?"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && drafts.length > 0) {
+                e.preventDefault();
+                commitDrafts();
+              }
+            }}
+            rows={1}
+            placeholder="What are we bringing? Paste a whole list if you like."
             autoFocus
-            className="field"
+            className="field no-scrollbar block resize-none leading-[22px]"
+            style={{ height: 46, paddingTop: 11, paddingBottom: 11 }}
           />
-          <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
-            {[...new Set([...categories, "Other"])].map((c) => (
-              <button
-                key={c}
-                onClick={() => setNewCategory(c)}
-                className={`pressable flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold ${
-                  newCategory === c ? "btn-primary" : "border border-hairline text-fg-muted"
-                }`}
+
+          <AnimatePresence initial={false} mode="popLayout">
+            {drafts.length === 1 && lead && (
+              <motion.div
+                key="single"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={FADE}
+                className="flex items-center gap-2"
               >
-                {c}
-              </button>
-            ))}
+                <CategoryPill category={lead.category} />
+                <p className="text-[11px] text-fg-muted">
+                  {pinnedCategory
+                    ? "your pick"
+                    : lead.suggestion.confidence < AUTO_TAG_THRESHOLD
+                      ? "not sure — pick a tag"
+                      : lead.suggestion.source === "learned"
+                        ? "auto · matches your list"
+                        : "auto-tagged"}
+                </p>
+              </motion.div>
+            )}
+            {drafts.length > 1 && (
+              <motion.ul
+                key="many"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={FADE}
+                className="max-h-44 space-y-1.5 overflow-y-auto rounded-xl border border-hairline p-2.5"
+              >
+                {drafts.map((draft, i) => (
+                  <li key={`${draft.label}-${i}`} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm">{draft.label}</span>
+                    <CategoryPill category={draft.category} />
+                  </li>
+                ))}
+              </motion.ul>
+            )}
+          </AnimatePresence>
+
+          <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
+            {chipOptions.map((c) => {
+              const active = activeCategory === c;
+              const auto = !pinnedCategory && active;
+              return (
+                <button
+                  key={c}
+                  // tapping the pinned chip again hands control back to auto
+                  onClick={() => setPinnedCategory(pinnedCategory === c ? null : c)}
+                  className={`pressable flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold ${
+                    active ? "btn-primary" : "border border-hairline text-fg-muted"
+                  }`}
+                >
+                  {auto && "✨ "}
+                  {categoryMeta(c).emoji} {c}
+                </button>
+              );
+            })}
           </div>
+
           <div className="flex gap-1.5">
             {(
               [
@@ -315,25 +528,89 @@ export default function PackingPage() {
               <button
                 key={label}
                 disabled={id === "none"}
-                onClick={() => setNewAssign(id)}
+                onClick={() => {
+                  setNewAssign(id);
+                  setAssignPinned(true);
+                }}
                 className={`pressable flex-1 rounded-xl py-2.5 text-xs font-semibold disabled:opacity-40 ${
-                  newAssign === id ? "btn-primary" : "border border-hairline text-fg-muted"
+                  assignTo === id ? "btn-primary" : "border border-hairline text-fg-muted"
                 }`}
               >
                 {label}
               </button>
             ))}
           </div>
+          {!assignPinned && lead?.detectedAssignee && (
+            <p className="-mt-2 text-[11px] text-fg-muted">
+              Assigned from what you typed — the name is dropped from the label.
+            </p>
+          )}
+
           <button
-            disabled={!newLabel.trim()}
-            onClick={() => {
-              void addPackingItem(newCategory, newLabel.trim(), newAssign);
-              setNewLabel("");
-              setAddOpen(false);
-            }}
+            disabled={drafts.length === 0}
+            onClick={commitDrafts}
             className="btn-primary pressable h-12 w-full rounded-xl font-semibold disabled:opacity-40"
           >
-            Add to list
+            {drafts.length > 1 ? `Add ${drafts.length} items` : "Add to list"}
+          </button>
+        </div>
+      </Sheet>
+
+      {/* open is derived, so clearing the last proposal closes the sheet */}
+      <Sheet
+        open={tidyOpen && retags.length > 0}
+        onClose={() => setTidyOpen(false)}
+        title="Tidy up tags"
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-fg-muted">
+            These look filed under the wrong tag. Move them, or keep them where they are.
+          </p>
+          <ul className="space-y-1">
+            <AnimatePresence initial={false} mode="popLayout">
+              {retags.map((proposal) => (
+                <motion.li
+                  key={proposal.item.id}
+                  layout="position"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ ...FADE, layout: SPRING }}
+                  className="flex items-center gap-2 rounded-xl px-1 py-1.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{proposal.item.label}</p>
+                    <p className="mt-0.5 flex items-center gap-1 text-[11px] text-fg-muted">
+                      <span className="line-through">{proposal.from}</span>
+                      <span aria-hidden>→</span>
+                      <CategoryPill category={proposal.to} />
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => applyRetags([{ item: proposal.item, to: proposal.to }])}
+                    className="btn-ghost pressable rounded-lg px-2.5 py-1.5 text-[11px] font-semibold"
+                  >
+                    Move
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTidySkipped((s) => [...s, proposal.item.id]);
+                      if (retags.length === 1) setTidyOpen(false);
+                    }}
+                    aria-label={`Keep ${proposal.item.label} in ${proposal.from}`}
+                    className="pressable rounded-lg px-2 py-1.5 text-fg-faint"
+                  >
+                    <IconX size={12} />
+                  </button>
+                </motion.li>
+              ))}
+            </AnimatePresence>
+          </ul>
+          <button
+            onClick={() => applyRetags(retags.map((r) => ({ item: r.item, to: r.to })))}
+            className="btn-primary pressable h-12 w-full rounded-xl font-semibold"
+          >
+            Move all {retags.length}
           </button>
         </div>
       </Sheet>

@@ -84,13 +84,16 @@ src/
 | `server/auth.ts` | Server-only `verifyTraveler()` — Bearer-token gate for `/api/analyze` and `/api/overpass`. |
 | `osrm.ts` | `fetchRoute()` with memory → Supabase `route_cache` → network. |
 | `overpass.ts` | POI suggestions along a route corridor (Overpass/QLever, cached). |
-| `geo.ts` | Pure geometry: haversine, point-to-polyline, region-by-latitude, `hashKey`. |
+| `geo.ts` | Pure geometry: haversine, point-to-segment projection, accuracy rings, region-by-latitude, `hashKey`. |
+| `journey.ts` | The map's route simulation: stitches the day routes into one distance timeline, `positionAtDistance()`, `nearestOnJourney()` (snap a GPS fix onto the route), `liveDistance()` (where the clock says we'd be), plus the device-local vehicle-emoji pick. |
+| `location.ts` | Live device location (Zustand): a `watchPosition` wrapper behind an explicit opt-in — silent resume once granted, watch paused while backgrounded, fix kept in memory only. |
 | `costs.ts` | Seed cost model (2026 regional averages) + `seedEstimate()`. |
 | `schedule.ts` | Arrival/departure ETA computation per stop. |
 | `weather.ts` | Open-Meteo forecasts per stop cluster (Zustand store). |
 | `clusters.ts` | Group nearby stops so forecasts aren't repeated. |
 | `shaping.ts` | Insert an invisible via/shaping point on a day's route. |
 | `analysis.ts` | AI trip analyzer client half: `analysisKey()` (cache key = hash of the itinerary + budget knobs) and `buildAnalysisPayload()` (the compact snapshot `/api/analyze` feeds to Claude). |
+| `packingTags.ts` | Packing auto-tagging: `suggestCategory()` (learned-neighbor + curated-lexicon classifier with typo correction and a confidence score), `detectAssignee()`, `parsePackingEntries()`, `suggestRetags()`, plus the category palette/emoji. Pure and local — no network, no model. |
 | `theme.ts` | Light/dark/system preference, persisted per device. |
 | `motion.ts` | Shared Motion animation tokens (springs, fades, staggered rise). All structural animation (enter/exit, layout, sheets) uses Motion with these; micro feedback (`.pressable`, color transitions) stays CSS. `prefers-reduced-motion` is honored globally via `MotionProvider`. |
 | `suggestionPreview.ts` | Transient Zustand bridge: pins the current "suggest nearby" results on the map while `SuggestSheet` is open. |

@@ -12,11 +12,21 @@ export function haversineM(a: LngLat, b: LngLat): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+export interface SegmentProjection {
+  /** The closest point on the segment itself. */
+  point: LngLat;
+  /** How far along [a, b] that point sits, 0–1. */
+  t: number;
+  /** Distance from p to that point, in meters. */
+  distM: number;
+}
+
 /**
- * Distance (meters) from point p to segment [a, b] using a local planar
- * approximation — plenty accurate at the scales we care about (< ~200 km).
+ * Project p onto segment [a, b] using a local planar approximation — plenty
+ * accurate at the scales we care about (< ~200 km). Longitude is scaled by
+ * cos(lat) so the projection isn't skewed at our latitudes.
  */
-export function distToSegmentM(p: LngLat, a: LngLat, b: LngLat): number {
+export function closestOnSegment(p: LngLat, a: LngLat, b: LngLat): SegmentProjection {
   const cos = Math.cos((p[1] * Math.PI) / 180);
   const px = p[0] * cos;
   const py = p[1];
@@ -32,7 +42,32 @@ export function distToSegmentM(p: LngLat, a: LngLat, b: LngLat): number {
   const cx = ax + t * dx;
   const cy = ay + t * dy;
   const degDist = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
-  return (degDist * Math.PI * R) / 180;
+  return {
+    point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
+    t,
+    distM: (degDist * Math.PI * R) / 180,
+  };
+}
+
+/** Distance (meters) from point p to segment [a, b]. */
+export function distToSegmentM(p: LngLat, a: LngLat, b: LngLat): number {
+  return closestOnSegment(p, a, b).distM;
+}
+
+/**
+ * A closed ring approximating a circle of `radiusM` around `center`, for
+ * drawing a GPS accuracy halo as a real-world-sized polygon (MapLibre's circle
+ * layers are sized in pixels, which would lie about the accuracy as you zoom).
+ */
+export function circleRing(center: LngLat, radiusM: number, steps = 64): LngLat[] {
+  const latDeg = (radiusM / R) * (180 / Math.PI);
+  const lngDeg = latDeg / Math.max(0.01, Math.cos((center[1] * Math.PI) / 180));
+  const ring: LngLat[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI;
+    ring.push([center[0] + Math.cos(a) * lngDeg, center[1] + Math.sin(a) * latDeg]);
+  }
+  return ring;
 }
 
 /** Downsample a polyline so consecutive points are >= stepM apart. */

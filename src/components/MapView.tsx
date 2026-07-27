@@ -21,16 +21,18 @@ import { MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_SATELLITE } from "@/lib/conf
 import { IconLayers } from "./Icons";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor } from "@/lib/colors";
-import { bboxOf, type LngLat } from "@/lib/geo";
+import { bboxOf, circleRing, type LngLat } from "@/lib/geo";
 import {
   buildJourney,
   getVehiclePref,
   liveDistance,
+  nearestOnJourney,
   positionAtDistance,
   serverVehiclePref,
   vehicleEmoji,
   vehicleSubscribe,
 } from "@/lib/journey";
+import { useLocation, type LocationFix, type LocationStatus } from "@/lib/location";
 import { FADE, riseIn } from "@/lib/motion";
 import { SUGGESTION_CATEGORIES } from "@/lib/overpass";
 import { useSchedule } from "@/lib/schedule";
@@ -51,9 +53,46 @@ type StyleMode = "street" | "satellite";
 const STYLE_PREF_KEY = "coastline-map-style";
 const SHOW_VIAS_KEY = "coastline-show-vias";
 
+/** What to say when the blip can't be shown. Silence would read as a bug. */
+const LOCATION_NOTICE: Partial<Record<LocationStatus, string>> = {
+  denied: "Location is blocked — turn it back on for this site in your browser settings.",
+  unavailable: "This browser can't share a location.",
+  error: "Couldn't get a fix — try again with a clearer view of the sky.",
+};
+
+/** How long a full-loop sweep takes; shorter runs keep the same pace. */
+const FULL_SWEEP_MS = 28_000;
+/** Beyond this far off the line, a fix says nothing about where on the route we are. */
+const OFF_ROUTE_LIMIT_M = 60_000;
+
 const CATEGORY_ICON = Object.fromEntries(
   SUGGESTION_CATEGORIES.map((c) => [c.key, c.icon]),
 ) as Record<string, string>;
+
+/**
+ * GPS accuracy halo — a real-world-sized ring under the blip, so the circle
+ * keeps meaning the same thing at every zoom. Added alongside the route layers
+ * and rebuilt after a style swap, same as they are.
+ */
+function addLocationLayers(map: MLMap) {
+  if (map.getSource("location")) return;
+  map.addSource("location", {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: "location-accuracy-fill",
+    type: "fill",
+    source: "location",
+    paint: { "fill-color": "#0d9488", "fill-opacity": 0.1 },
+  });
+  map.addLayer({
+    id: "location-accuracy-line",
+    type: "line",
+    source: "location",
+    paint: { "line-color": "#0d9488", "line-width": 1, "line-opacity": 0.35 },
+  });
+}
 
 /** Route source + line layers — added on load and re-added after setStyle. */
 function addRouteLayers(map: MLMap, mode: StyleMode, dark: boolean) {
@@ -136,10 +175,10 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
   const orderedDays = useOrderedDays();
 
-  // ---- journey vehicle (a marker that tracks the route by the clock) -------
-  // In "live" mode its distance along the route is derived from the real clock
-  // through the trip schedule (parked at the origin until departure day); the
-  // "drive it" control sweeps that distance start→finish to preview the loop.
+  // ---- journey vehicle (the simulation marker) -----------------------------
+  // "Where are we" is answered by the live GPS blip below; this emoji only
+  // exists while the sim is running, sweeping from wherever we are to the
+  // finish so pressing play previews the road *ahead*, not the trip so far.
   const schedule = useSchedule();
   const vehicleKey = useSyncExternalStore(vehicleSubscribe, getVehiclePref, serverVehiclePref);
   const journey = useMemo(() => buildJourney(orderedDays, routes), [orderedDays, routes]);
@@ -154,6 +193,12 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   useEffect(() => {
     journeyRef.current = journey;
   }, [journey]);
+
+  // ---- live location ------------------------------------------------------
+  const locStatus = useLocation((s) => s.status);
+  const blipMarker = useRef<Marker | null>(null);
+  /** The status whose notice has already had its say. */
+  const [noticeSeen, setNoticeSeen] = useState<LocationStatus | null>(null);
 
   // ---- init ---------------------------------------------------------------
   useEffect(() => {
@@ -180,6 +225,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
     map.on("load", () => {
       addRouteLayers(map, initialMode, dark);
+      addLocationLayers(map);
 
       // Tap the line → drop a shaping point in that gap.
       map.on("click", "route-line", (e) => {
@@ -231,6 +277,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       vm.clear();
       wm.clear();
       journeyMarker.current = null;
+      blipMarker.current = null;
     };
      
   }, []);
@@ -297,6 +344,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     const onStyleLoad = () => {
       pendingStyleLoad.current = null;
       addRouteLayers(map, next, dark);
+      addLocationLayers(map);
       setStyleEpoch((e) => e + 1);
     };
     pendingStyleLoad.current = onStyleLoad;
@@ -577,7 +625,7 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   // Positioned imperatively (direct setLngLat, never React state per frame) so
   // the simulation's rAF sweep runs at 60fps without re-rendering this heavy
   // component — the same discipline the draw-on route animation uses.
-  const positionMarker = useCallback((dist: number, live: boolean) => {
+  const positionMarker = useCallback((dist: number) => {
     const map = mapRef.current;
     if (!map) return;
     const j = journeyRef.current;
@@ -599,21 +647,15 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     } else {
       journeyMarker.current.setLngLat(pos.lngLat);
     }
-    const el = journeyMarker.current.getElement();
-    el.textContent = emojiRef.current;
-    el.classList.toggle("live", live);
+    journeyMarker.current.getElement().textContent = emojiRef.current;
   }, []);
 
-  // live mode: park the marker where the clock puts us, refreshed on a slow
-  // cadence and whenever the route/plan changes. Suspended while simulating.
+  // the sim owns the vehicle marker outright — clear it the moment it stops
   useEffect(() => {
-    if (!mapReady || driving) return;
-    const tick = () =>
-      positionMarker(liveDistance(journey, orderedDays, stops, schedule, new Date()), true);
-    tick();
-    const t = setInterval(tick, 30_000);
-    return () => clearInterval(t);
-  }, [mapReady, driving, journey, orderedDays, stops, schedule, positionMarker]);
+    if (driving) return;
+    journeyMarker.current?.remove();
+    journeyMarker.current = null;
+  }, [driving]);
 
   // swap the emoji in place the instant the pick changes (no reposition)
   useEffect(() => {
@@ -622,8 +664,49 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     if (el) el.textContent = emojiRef.current;
   }, [vehicleKey]);
 
-  // "drive it": sweep the whole route start→finish (~28s), then hand the
-  // marker back to live mode.
+  /**
+   * Frame the stretch the sim is about to drive. Without this, a sim launched
+   * from a tight zoom on the live blip would send the vehicle straight off the
+   * edge of the screen a second later.
+   */
+  const frameRemaining = useEffectEvent((from: number) => {
+    const map = mapRef.current;
+    const j = journeyRef.current;
+    if (!map) return;
+    const ahead = j.points.filter((p) => p.cumDist >= from).map((p) => p.lngLat);
+    const start = positionAtDistance(j, from);
+    const coords = start ? [start.lngLat, ...ahead] : ahead;
+    if (coords.length < 2) return;
+    const [minX, minY, maxX, maxY] = bboxOf(coords);
+    map.fitBounds(
+      [
+        [minX, minY],
+        [maxX, maxY],
+      ],
+      { padding: { top: 130, bottom: 170, left: 46, right: 66 }, maxZoom: 11, duration: 700 },
+    );
+  });
+
+  /**
+   * Where the sim should pick up from: the point on the route closest to our
+   * live fix, else where the clock says we'd be, else the very start. Snapping
+   * is skipped if we're wildly off-route (a fix in another state would drag the
+   * sim to a meaningless spot on the coast).
+   */
+  const simStartDistance = useEffectEvent(() => {
+    const j = journeyRef.current;
+    if (j.totalDist <= 0) return 0;
+    const fix = useLocation.getState().fix;
+    if (fix) {
+      const near = nearestOnJourney(j, fix.lngLat);
+      if (near && near.offRouteM <= OFF_ROUTE_LIMIT_M) return near.dist;
+    }
+    return liveDistance(j, orderedDays, stops, schedule, new Date());
+  });
+
+  // "drive it": sweep from where we are to the finish, then clear the marker.
+  // The pace is held constant (not the duration), so a sim starting near the
+  // end is a short hop rather than a crawl across the last hundred miles.
   useEffect(() => {
     if (!driving) return;
     const total = journeyRef.current.totalDist;
@@ -631,9 +714,23 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
       setDriving(false);
       return;
     }
+    const from = Math.max(0, Math.min(simStartDistance(), total));
+    const span = total - from;
+    frameRemaining(from);
+    if (span <= 0) {
+      // already at the finish — nothing to sweep, so just show the end
+      positionMarker(total);
+      setSimProgress(1);
+      const to = setTimeout(() => setDriving(false), 900);
+      return () => clearTimeout(to);
+    }
+    const atDistance = (d: number) => {
+      positionMarker(d);
+      return total > 0 ? d / total : 0;
+    };
     // reduced motion: skip the sweep, just rest at the finish for a beat
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      positionMarker(total, false);
+      atDistance(total);
       const raf = requestAnimationFrame(() => setSimProgress(1));
       const to = setTimeout(() => setDriving(false), 900);
       return () => {
@@ -641,16 +738,16 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         clearTimeout(to);
       };
     }
-    const DURATION = 28_000;
+    const duration = Math.max(4_000, FULL_SWEEP_MS * (span / total));
     const t0 = performance.now();
     let raf = 0;
     let lastHud = 0;
     const tick = (now: number) => {
-      const p = Math.min(1, (now - t0) / DURATION);
-      positionMarker(p * total, false);
+      const p = Math.min(1, (now - t0) / duration);
+      const trip = atDistance(from + p * span);
       // throttle the HUD's React state to ~6fps; the marker moves every frame
       if (now - lastHud > 160) {
-        setSimProgress(p);
+        setSimProgress(trip);
         lastHud = now;
       }
       if (p < 1) {
@@ -663,6 +760,112 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [driving, positionMarker]);
+
+  // ---- live location blip -------------------------------------------------
+  // Positioned imperatively off a store subscription: a GPS watch pushes a fix
+  // roughly once a second, and this component is far too heavy to re-render on
+  // that cadence just to move a dot 8 pixels.
+  const paintFix = useCallback((fix: LocationFix | null) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const source = map.getSource("location") as maplibregl.GeoJSONSource | undefined;
+    if (!fix) {
+      blipMarker.current?.remove();
+      blipMarker.current = null;
+      source?.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+    if (!blipMarker.current) {
+      const el = document.createElement("div");
+      el.className = "live-blip";
+      el.setAttribute("aria-hidden", "true");
+      blipMarker.current = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat(fix.lngLat)
+        .addTo(map);
+    } else {
+      blipMarker.current.setLngLat(fix.lngLat);
+    }
+    // Only draw the halo when the fix is vague enough for it to mean something;
+    // a 5 m ring is invisible noise, and a 2 km one is worth seeing.
+    source?.setData({
+      type: "FeatureCollection",
+      features:
+        fix.accuracyM > 25
+          ? [
+              {
+                type: "Feature",
+                geometry: { type: "Polygon", coordinates: [circleRing(fix.lngLat, fix.accuracyM)] },
+                properties: {},
+              },
+            ]
+          : [],
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    paintFix(useLocation.getState().fix);
+    return useLocation.subscribe((s, prev) => {
+      if (s.fix !== prev.fix) paintFix(s.fix);
+    });
+  }, [mapReady, styleEpoch, paintFix]);
+
+  // Permission may already be granted from a previous session — pick the watch
+  // back up without prompting, so the blip is simply there on open.
+  useEffect(() => {
+    useLocation.getState().resumeIfGranted();
+  }, []);
+
+  // Tell the traveler what happened instead of just not showing a blip. The
+  // text is derived from the status; dismissal only remembers which status was
+  // already acknowledged, so a later failure speaks up again.
+  const hasCentered = useRef(false);
+  useEffect(() => {
+    if (locStatus === "idle") hasCentered.current = false;
+  }, [locStatus]);
+
+  const locNotice = noticeSeen === locStatus ? null : (LOCATION_NOTICE[locStatus] ?? null);
+  useEffect(() => {
+    if (!locNotice) return;
+    const t = setTimeout(() => setNoticeSeen(locStatus), 6000);
+    return () => clearTimeout(t);
+  }, [locNotice, locStatus]);
+
+  const centerOnFix = useCallback((zoom = 12) => {
+    const map = mapRef.current;
+    const fix = useLocation.getState().fix;
+    if (!map || !fix) return false;
+    map.flyTo({ center: fix.lngLat, zoom: Math.max(map.getZoom(), zoom), duration: 800, essential: true });
+    return true;
+  }, []);
+
+  // first fix after turning tracking on → bring it on screen
+  useEffect(() => {
+    if (locStatus !== "live" || hasCentered.current) return;
+    if (centerOnFix()) hasCentered.current = true;
+  }, [locStatus, centerOnFix]);
+
+  const toggleLocate = useCallback(() => {
+    const { status, start, stop, fix } = useLocation.getState();
+    const map = mapRef.current;
+    if (status === "idle" || status === "denied" || status === "error") {
+      start();
+      return;
+    }
+    // Already tracking. A tap almost always means "put me back in the middle",
+    // so only the second tap in a row — with the blip already sitting dead
+    // center — is read as "that's enough" and switches tracking off.
+    if (fix && map) {
+      const at = map.project(fix.lngLat);
+      const { width, height } = map.getCanvas().getBoundingClientRect();
+      const centered = Math.hypot(at.x - width / 2, at.y - height / 2) < 60;
+      if (!centered) {
+        centerOnFix();
+        return;
+      }
+    }
+    stop();
+  }, [centerOnFix]);
 
   // ---- camera -------------------------------------------------------------------
   const fitTrip = useCallback(() => {
@@ -780,12 +983,47 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         </svg>
       </button>
 
+      {/* live location — tap to start tracking, again to recenter or stop */}
+      <button
+        onClick={toggleLocate}
+        aria-label={
+          locStatus === "live" || locStatus === "locating"
+            ? "Recenter on my location"
+            : "Show my location"
+        }
+        aria-pressed={locStatus === "live" || locStatus === "locating"}
+        className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+274px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
+          locStatus === "live" ? "text-accent" : "text-fg-muted"
+        }`}
+      >
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+          <circle cx="9" cy="9" r="3.1" fill="currentColor" />
+          <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
+          <path
+            d="M9 .8v2.2M9 15v2.2M.8 9H3m12 0h2.2"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+        {locStatus === "locating" && (
+          <span className="absolute inset-0 animate-ping rounded-2xl border border-accent/50" />
+        )}
+      </button>
+
       {/* drive the route — animate the vehicle along the whole loop */}
       {journey.totalDist > 0 && (
         <button
-          onClick={() => setDriving((d) => !d)}
-          aria-label={driving ? "Stop driving the route" : "Drive the route"}
-          className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+274px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
+          onClick={() => {
+            if (driving) {
+              setDriving(false);
+              return;
+            }
+            setSimProgress(0); // don't flash the last run's percentage
+            setDriving(true);
+          }}
+          aria-label={driving ? "Stop driving the route" : "Drive the route from here"}
+          className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+326px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
             driving ? "text-accent" : "text-fg-muted"
           }`}
         >
@@ -831,6 +1069,21 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
                 {Math.round(simProgress * 100)}%
               </span>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* location trouble — says what happened instead of failing silently */}
+      <AnimatePresence>
+        {locNotice && (
+          <motion.div
+            {...riseIn()}
+            exit={{ opacity: 0, y: 8, transition: FADE }}
+            className="pointer-events-none absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+150px)] z-10 flex justify-center px-6"
+          >
+            <p className="glass-strong rounded-2xl px-4 py-2.5 text-center text-xs font-medium text-fg-muted">
+              {locNotice}
+            </p>
           </motion.div>
         )}
       </AnimatePresence>

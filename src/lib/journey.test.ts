@@ -3,6 +3,7 @@ import {
   buildJourney,
   getVehiclePref,
   liveDistance,
+  nearestOnJourney,
   positionAtDistance,
   serverVehiclePref,
   VEHICLES,
@@ -118,6 +119,51 @@ describe("positionAtDistance", () => {
 
   it("returns null for an empty journey", () => {
     expect(positionAtDistance(buildJourney([], {}), 100)).toBeNull();
+  });
+});
+
+describe("nearestOnJourney", () => {
+  const j = buildJourney([dayA, dayB], routes);
+
+  it("snaps a point beside the line to its distance along the loop", () => {
+    // half a degree east, a touch north of the line = halfway along day A
+    const near = nearestOnJourney(j, [0.5, 0.01])!;
+    expect(near.dist).toBeCloseTo(j.legs[0].endDist / 2, -2);
+    expect(near.offRouteM).toBeLessThan(1200);
+    expect(near.lngLat[0]).toBeCloseTo(0.5, 3);
+  });
+
+  it("reports how far off-route the query sits", () => {
+    const near = nearestOnJourney(j, [0.5, 1])!;
+    expect(near.offRouteM).toBeGreaterThan(110000);
+  });
+
+  it("clamps to the ends rather than extrapolating", () => {
+    expect(nearestOnJourney(j, [-5, 0])!.dist).toBe(0);
+    expect(nearestOnJourney(j, [9, 0])!.dist).toBeCloseTo(j.totalDist, 6);
+  });
+
+  it("picks the nearer pass when the route doubles back", () => {
+    // out along y=0 and back along y=1: a point just under the return leg
+    // must snap to the return leg, not to the outbound one it started from
+    const loop = buildJourney([dayA, dayB], {
+      A: route("A", [
+        [0, 0],
+        [2, 0],
+      ]),
+      B: route("B", [
+        [2, 0],
+        [2, 1],
+        [0, 1],
+      ]),
+    });
+    const near = nearestOnJourney(loop, [1, 0.98])!;
+    expect(near.dist).toBeGreaterThan(loop.legs[0].endDist);
+    expect(near.offRouteM).toBeLessThan(2500);
+  });
+
+  it("has nothing to say about an empty journey", () => {
+    expect(nearestOnJourney(buildJourney([], {}), [0, 0])).toBeNull();
   });
 });
 
