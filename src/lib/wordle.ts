@@ -76,6 +76,22 @@ export function keyStates(scored: ScoredGuess[]): Record<string, LetterState> {
 }
 
 /**
+ * Whether a submitted guess is actually allowed — five letters that form a
+ * real word, not just any combination that fills the row. `dictionary` is
+ * injected (rather than imported here) so this stays a pure, dependency-free
+ * check: the UI passes the ~14.9k-word list from `wordleDictionary.ts` union
+ * `WORDLE_WORDS`, loaded lazily so non-Wordle games never fetch it.
+ */
+export function isValidGuess(
+  guess: string,
+  dictionary: ReadonlySet<string> | ReadonlyArray<string>,
+): boolean {
+  const g = guess.toUpperCase();
+  if (g.length !== WORD_LENGTH) return false;
+  return "has" in dictionary ? dictionary.has(g) : dictionary.includes(g);
+}
+
+/**
  * Pick a random answer the crew hasn't solved yet. Solved words are excluded
  * so the shuffle never repeats a cleared word — until every word is cleared,
  * at which point the full bank is fair game again (so the game never dead-ends).

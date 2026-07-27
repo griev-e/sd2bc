@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WORDLE_WORDS } from "./gameData";
 import {
+  isValidGuess,
   keyStates,
   MAX_GUESSES,
   pickWord,
@@ -91,6 +92,31 @@ describe("keyStates", () => {
     expect(keys.O).toBe("correct");
     expect(keys.E).toBe("correct"); // present in guess 1, correct in guess 2
     expect(keys.T).toBe("absent");
+  });
+});
+
+describe("isValidGuess", () => {
+  const dict = ["BEACH", "OCEAN", "OTTER"];
+
+  it("accepts a word in the dictionary, case-insensitively", () => {
+    expect(isValidGuess("beach", dict)).toBe(true);
+    expect(isValidGuess("OCEAN", dict)).toBe(true);
+  });
+
+  it("rejects a random string of letters not in the dictionary", () => {
+    expect(isValidGuess("ZZZZZ", dict)).toBe(false);
+    expect(isValidGuess("QWERT", dict)).toBe(false);
+  });
+
+  it("rejects anything not exactly WORD_LENGTH letters, even if a prefix matches", () => {
+    expect(isValidGuess("BEAC", dict)).toBe(false);
+    expect(isValidGuess("BEACHY", dict)).toBe(false);
+  });
+
+  it("works against a Set as well as an array", () => {
+    const set = new Set(dict);
+    expect(isValidGuess("OTTER", set)).toBe(true);
+    expect(isValidGuess("NOPES", set)).toBe(false);
   });
 });
 
