@@ -14,7 +14,7 @@ import type { GameId } from "@/lib/types";
 
 const GAMES: { id: GameId; label: string; blurb: string }[] = [
   { id: "wordle", label: "Wordle", blurb: "Five letters, five tries — coastal edition" },
-  { id: "plates", label: "Plates", blurb: "License-plate bingo — collect them together" },
+  { id: "plates", label: "Plates", blurb: "License-plate bingo — spot together, rank your favorites" },
   { id: "roadside", label: "I Spy", blurb: "Roadside scavenger hunt" },
   { id: "fastfood", label: "Chains", blurb: "Count your chain's sightings" },
   { id: "cars", label: "$$$ Cars", blurb: "Priciest spot on record" },
