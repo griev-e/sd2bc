@@ -878,7 +878,7 @@ input[type="checkbox"].check-pill:checked {
   z-index: 4;
   pointer-events: none;
 }
-/* live GPS blip — where this phone actually is, as opposed to the simulation */
+/* live GPS blip — where this phone actually is, as opposed to the plan marker */
 .live-blip {
   position: absolute;
   top: 0;

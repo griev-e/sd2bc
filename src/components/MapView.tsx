@@ -21,6 +21,7 @@ import { MAP_STYLE_DARK, MAP_STYLE_LIGHT, MAP_STYLE_SATELLITE } from "@/lib/conf
 import { IconLayers } from "./Icons";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor } from "@/lib/colors";
+import { fmtMiles } from "@/lib/format";
 import { bboxOf, circleRing, type LngLat } from "@/lib/geo";
 import {
   buildJourney,
@@ -60,10 +61,12 @@ const LOCATION_NOTICE: Partial<Record<LocationStatus, string>> = {
   error: "Couldn't get a fix — try again with a clearer view of the sky.",
 };
 
-/** How long a full-loop sweep takes; shorter runs keep the same pace. */
-const FULL_SWEEP_MS = 28_000;
 /** Beyond this far off the line, a fix says nothing about where on the route we are. */
 const OFF_ROUTE_LIMIT_M = 60_000;
+/** Within this of the plan (measured along the route), we call it on schedule. */
+const ON_PACE_M = 800;
+/** Device-local: whether the "where we should be" marker is shown. */
+const SHOW_PLAN_KEY = "coastline-show-plan";
 
 const CATEGORY_ICON = Object.fromEntries(
   SUGGESTION_CATEGORIES.map((c) => [c.key, c.icon]),
@@ -175,21 +178,24 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
   const orderedDays = useOrderedDays();
 
-  // ---- journey vehicle (the simulation marker) -----------------------------
-  // "Where are we" is answered by the live GPS blip below; this emoji only
-  // exists while the sim is running, sweeping from wherever we are to the
-  // finish so pressing play previews the road *ahead*, not the trip so far.
+  // ---- journey vehicle (the "should be here" marker) -----------------------
+  // "Where are we" is answered by the live GPS blip below; this emoji is the
+  // schedule's answer to "where are we *supposed* to be right now" — the day
+  // routes stitched into one timeline, positioned by the clock. Shown or
+  // hidden with the map's plan toggle, remembered per device like the vias.
   const schedule = useSchedule();
   const vehicleKey = useSyncExternalStore(vehicleSubscribe, getVehiclePref, serverVehiclePref);
   const journey = useMemo(() => buildJourney(orderedDays, routes), [orderedDays, routes]);
-  // refs so the imperative positioner + rAF loop always read the latest values
-  // without re-subscribing every frame; kept current from effects (never
-  // written during render) so a mid-sim route recompute can't restart the sweep
+  // refs so the imperative positioner always reads the latest values without
+  // being torn down and rebuilt for a mere emoji swap or route recompute
   const journeyRef = useRef(journey);
   const emojiRef = useRef(vehicleEmoji(vehicleKey));
   const journeyMarker = useRef<Marker | null>(null);
-  const [driving, setDriving] = useState(false);
-  const [simProgress, setSimProgress] = useState(0);
+  const [showPlan, setShowPlan] = useState<boolean>(
+    () => typeof window !== "undefined" && localStorage.getItem(SHOW_PLAN_KEY) === "1",
+  );
+  /** The planned distance (and how far the live fix sits from it) for the HUD. */
+  const [plan, setPlan] = useState<{ dist: number; deltaM: number | null } | null>(null);
   useEffect(() => {
     journeyRef.current = journey;
   }, [journey]);
@@ -622,9 +628,8 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   }, [viaPoints, mapReady, showVias]);
 
   // ---- journey vehicle marker ---------------------------------------------------
-  // Positioned imperatively (direct setLngLat, never React state per frame) so
-  // the simulation's rAF sweep runs at 60fps without re-rendering this heavy
-  // component — the same discipline the draw-on route animation uses.
+  // Positioned imperatively (direct setLngLat, no per-move React state for the
+  // marker itself) — the same discipline the live blip uses below.
   const positionMarker = useCallback((dist: number) => {
     const map = mapRef.current;
     if (!map) return;
@@ -650,12 +655,12 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     journeyMarker.current.getElement().textContent = emojiRef.current;
   }, []);
 
-  // the sim owns the vehicle marker outright — clear it the moment it stops
+  // the toggle owns the vehicle marker outright — clear it the moment it hides
   useEffect(() => {
-    if (driving) return;
+    if (showPlan) return;
     journeyMarker.current?.remove();
     journeyMarker.current = null;
-  }, [driving]);
+  }, [showPlan]);
 
   // swap the emoji in place the instant the pick changes (no reposition)
   useEffect(() => {
@@ -664,102 +669,61 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     if (el) el.textContent = emojiRef.current;
   }, [vehicleKey]);
 
-  /**
-   * Frame the stretch the sim is about to drive. Without this, a sim launched
-   * from a tight zoom on the live blip would send the vehicle straight off the
-   * edge of the screen a second later.
-   */
-  const frameRemaining = useEffectEvent((from: number) => {
-    const map = mapRef.current;
-    const j = journeyRef.current;
-    if (!map) return;
-    const ahead = j.points.filter((p) => p.cumDist >= from).map((p) => p.lngLat);
-    const start = positionAtDistance(j, from);
-    const coords = start ? [start.lngLat, ...ahead] : ahead;
-    if (coords.length < 2) return;
-    const [minX, minY, maxX, maxY] = bboxOf(coords);
-    map.fitBounds(
-      [
-        [minX, minY],
-        [maxX, maxY],
-      ],
-      { padding: { top: 130, bottom: 170, left: 46, right: 66 }, maxZoom: 11, duration: 700 },
-    );
-  });
-
-  /**
-   * Where the sim should pick up from: the point on the route closest to our
-   * live fix, else where the clock says we'd be, else the very start. Snapping
-   * is skipped if we're wildly off-route (a fix in another state would drag the
-   * sim to a meaningless spot on the coast).
-   */
-  const simStartDistance = useEffectEvent(() => {
-    const j = journeyRef.current;
-    if (j.totalDist <= 0) return 0;
-    const fix = useLocation.getState().fix;
-    if (fix) {
-      const near = nearestOnJourney(j, fix.lngLat);
-      if (near && near.offRouteM <= OFF_ROUTE_LIMIT_M) return near.dist;
-    }
-    return liveDistance(j, orderedDays, stops, schedule, new Date());
-  });
-
-  // "drive it": sweep from where we are to the finish, then clear the marker.
-  // The pace is held constant (not the duration), so a sim starting near the
-  // end is a short hop rather than a crawl across the last hundred miles.
+  // While shown, the marker sits where the clock says we should be and is
+  // re-placed on a slow tick — a minute of a driving day is only a mile or
+  // two, so 30s keeps it honest without burning frames — and immediately
+  // whenever the routes, stops, or schedule shift underneath it.
   useEffect(() => {
-    if (!driving) return;
-    const total = journeyRef.current.totalDist;
-    if (total <= 0) {
-      setDriving(false);
+    if (!showPlan || !mapReady) return;
+    const sync = () => {
+      if (journey.totalDist <= 0) {
+        setPlan(null);
+        return;
+      }
+      const dist = liveDistance(journey, orderedDays, stops, schedule, new Date());
+      positionMarker(dist);
+      // Pacing vs the plan is measured *along the route* (a curvy coastal mile
+      // counts as a mile). A fix wildly off the line says nothing about our
+      // progress, so it reports no delta rather than a misleading one.
+      let deltaM: number | null = null;
+      const fix = useLocation.getState().fix;
+      if (fix) {
+        const near = nearestOnJourney(journey, fix.lngLat);
+        if (near && near.offRouteM <= OFF_ROUTE_LIMIT_M) deltaM = near.dist - dist;
+      }
+      setPlan({ dist, deltaM });
+    };
+    sync();
+    const tick = setInterval(sync, 30_000);
+    return () => clearInterval(tick);
+  }, [showPlan, mapReady, journey, orderedDays, stops, schedule, positionMarker]);
+
+  /**
+   * Turning the plan on brings the marker on screen (it may be a state away
+   * from wherever the map is parked); turning it off just hides it.
+   */
+  function togglePlan() {
+    const next = !showPlan;
+    setShowPlan(next);
+    localStorage.setItem(SHOW_PLAN_KEY, next ? "1" : "0");
+    if (!next) {
+      setPlan(null); // don't flash last time's HUD on the next show
       return;
     }
-    const from = Math.max(0, Math.min(simStartDistance(), total));
-    const span = total - from;
-    frameRemaining(from);
-    if (span <= 0) {
-      // already at the finish — nothing to sweep, so just show the end
-      positionMarker(total);
-      setSimProgress(1);
-      const to = setTimeout(() => setDriving(false), 900);
-      return () => clearTimeout(to);
-    }
-    const atDistance = (d: number) => {
-      positionMarker(d);
-      return total > 0 ? d / total : 0;
-    };
-    // reduced motion: skip the sweep, just rest at the finish for a beat
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      atDistance(total);
-      const raf = requestAnimationFrame(() => setSimProgress(1));
-      const to = setTimeout(() => setDriving(false), 900);
-      return () => {
-        cancelAnimationFrame(raf);
-        clearTimeout(to);
-      };
-    }
-    const duration = Math.max(4_000, FULL_SWEEP_MS * (span / total));
-    const t0 = performance.now();
-    let raf = 0;
-    let lastHud = 0;
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - t0) / duration);
-      const trip = atDistance(from + p * span);
-      // throttle the HUD's React state to ~6fps; the marker moves every frame
-      if (now - lastHud > 160) {
-        setSimProgress(trip);
-        lastHud = now;
-      }
-      if (p < 1) {
-        raf = requestAnimationFrame(tick);
-      } else {
-        setSimProgress(1);
-        setTimeout(() => setDriving(false), 900);
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [driving, positionMarker]);
+    const map = mapRef.current;
+    if (!map || journey.totalDist <= 0) return;
+    const pos = positionAtDistance(
+      journey,
+      liveDistance(journey, orderedDays, stops, schedule, new Date()),
+    );
+    if (!pos) return;
+    map.flyTo({
+      center: pos.lngLat,
+      zoom: Math.max(map.getZoom(), 7),
+      duration: 800,
+      essential: true,
+    });
+  }
 
   // ---- live location blip -------------------------------------------------
   // Positioned imperatively off a store subscription: a GPS watch pushes a fix
@@ -919,12 +883,11 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     }
   }, [mapReady, stops, fitTrip]);
 
-  // day the marker sits on while simulating — drives the progress HUD label
-  const simPos =
-    driving && journey.totalDist > 0
-      ? positionAtDistance(journey, simProgress * journey.totalDist)
-      : null;
-  const simDay = simPos && simPos.dayIndex >= 0 ? orderedDays[simPos.dayIndex] : null;
+  // day the schedule puts us on — drives the plan HUD label
+  const planPos =
+    showPlan && plan && journey.totalDist > 0 ? positionAtDistance(journey, plan.dist) : null;
+  const planDay = planPos && planPos.dayIndex >= 0 ? orderedDays[planPos.dayIndex] : null;
+  const planProgress = plan && journey.totalDist > 0 ? plan.dist / journey.totalDist : 0;
 
   return (
     <div className="absolute inset-0">
@@ -999,38 +962,31 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
         )}
       </button>
 
-      {/* drive the route — animate the vehicle along the whole loop */}
+      {/* where we're supposed to be — show/hide the schedule's marker */}
       {journey.totalDist > 0 && (
         <button
-          onClick={() => {
-            if (driving) {
-              setDriving(false);
-              return;
-            }
-            setSimProgress(0); // don't flash the last run's percentage
-            setDriving(true);
-          }}
-          aria-label={driving ? "Stop driving the route" : "Drive the route from here"}
+          onClick={togglePlan}
+          aria-label={showPlan ? "Hide where we should be" : "Show where we should be"}
           className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+326px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
-            driving ? "text-accent" : "text-fg-muted"
+            showPlan ? "text-accent" : "text-fg-muted"
           }`}
         >
-          {driving ? (
-            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden>
-              <rect x="3" y="2.5" width="3.3" height="11" rx="1" fill="currentColor" />
-              <rect x="9.7" y="2.5" width="3.3" height="11" rx="1" fill="currentColor" />
-            </svg>
-          ) : (
-            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden>
-              <path d="M4 2.7 13.2 8 4 13.3V2.7Z" fill="currentColor" />
-            </svg>
-          )}
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+            <circle cx="9" cy="9" r="6.6" stroke="currentColor" strokeWidth="1.6" />
+            <path
+              d="M9 5.6V9l2.4 1.7"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
       )}
 
-      {/* journey progress HUD — only while the simulation is running */}
+      {/* plan HUD — which day the schedule puts us on, and how we're pacing */}
       <AnimatePresence>
-        {driving && (
+        {showPlan && plan && (
           <motion.div
             {...riseIn()}
             exit={{ opacity: 0, y: 8, transition: FADE }}
@@ -1040,21 +996,30 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
               <span className="text-lg leading-none">{vehicleEmoji(vehicleKey)}</span>
               <div className="min-w-[128px]">
                 <p className="truncate text-[11px] font-semibold leading-tight">
-                  {simDay ? `Day ${simDay.seq}` : "On the road"}
-                  {simDay?.title ? ` · ${simDay.title}` : ""}
+                  {planDay ? `Day ${planDay.seq}` : "On the road"}
+                  {planDay?.title ? ` · ${planDay.title}` : ""}
                 </p>
                 <div className="mt-1 h-1 overflow-hidden rounded-full bg-fg/10">
                   <div
                     className="h-full rounded-full"
                     style={{
-                      width: `${Math.round(simProgress * 100)}%`,
+                      width: `${Math.round(planProgress * 100)}%`,
                       background: "var(--accent-gradient)",
                     }}
                   />
                 </div>
+                {plan.deltaM != null && (
+                  <p className="mt-1 text-[10px] font-medium leading-tight text-fg-muted">
+                    {Math.abs(plan.deltaM) < ON_PACE_M
+                      ? "right on schedule"
+                      : `${fmtMiles(Math.abs(plan.deltaM))} ${
+                          plan.deltaM > 0 ? "ahead of" : "behind"
+                        } schedule`}
+                  </p>
+                )}
               </div>
               <span className="tnum text-xs font-bold text-accent">
-                {Math.round(simProgress * 100)}%
+                {Math.round(planProgress * 100)}%
               </span>
             </div>
           </motion.div>
