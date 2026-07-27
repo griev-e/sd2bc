@@ -1,14 +1,15 @@
 "use client";
 
 import { distToSegmentM, type LngLat } from "./geo";
-import { supabase } from "./supabase";
 import { dayRoutePoints, useTrip } from "./store";
 
 /**
  * Drop an invisible shaping (via) point on a day's route at the tapped
- * location. Finds the nearest gap between route points, inserts there, and
- * renumbers the other shaping points in that gap. OSRM then re-routes
- * through it — no fake stops involved.
+ * location. Finds the nearest gap between route points and inserts there;
+ * the store renumbers the rest of that gap in the same optimistic write and
+ * kicks a route recompute, so the day's drive time in the itinerary follows
+ * within one debounce. OSRM then re-routes through it — no fake stops
+ * involved.
  */
 export async function insertShapingPoint(dayId: string, lngLat: LngLat): Promise<void> {
   const s = useTrip.getState();
@@ -34,37 +35,7 @@ export async function insertShapingPoint(dayId: string, lngLat: LngLat): Promise
   let ownerIdx = best;
   while (ownerIdx >= 0 && !points[ownerIdx].stopId) ownerIdx--;
   if (ownerIdx < 0) return;
-  const ownerStopId = points[ownerIdx].stopId!;
 
-  // Existing shaping points in this gap, in order; insertion position within them.
-  const gapVias: string[] = [];
-  for (let i = ownerIdx + 1; i < points.length && !points[i].stopId; i++) {
-    gapVias.push(points[i].viaId!);
-  }
-  const position = best - ownerIdx; // 0 = right after the stop
-
-  await s.addViaPoint(ownerStopId, lngLat[0], lngLat[1], position);
-
-  // Renumber the rest of the gap so ordering stays stable.
-  const db = supabase();
-  const updates: Promise<{ error: unknown }>[] = [];
-  let renumbered = false;
-  gapVias.forEach((viaId, i) => {
-    const newSeq = i < position ? i : i + 1;
-    const current = useTrip.getState().viaPoints.find((v) => v.id === viaId);
-    if (current && current.seq !== newSeq) {
-      renumbered = true;
-      useTrip.setState((st) => ({
-        viaPoints: st.viaPoints.map((v) => (v.id === viaId ? { ...v, seq: newSeq } : v)),
-      }));
-      updates.push(Promise.resolve(db.from("via_points").update({ seq: newSeq }).eq("id", viaId)));
-    }
-  });
-  // the setState calls above bypass the store's mutations, so kick the
-  // recompute explicitly — the Realtime echo won't (values already match)
-  if (renumbered) useTrip.getState().refreshRoutes();
-  const results = await Promise.all(updates);
-  // These writes bypass the store's rollback pattern, so on any failure the
-  // local gap order and the DB could disagree — re-pull truth instead.
-  if (results.some((r) => r.error)) void useTrip.getState().resync();
+  // Position within that stop's existing shaping points — 0 = right after it.
+  await s.addViaPoint(points[ownerIdx].stopId!, lngLat[0], lngLat[1], best - ownerIdx);
 }

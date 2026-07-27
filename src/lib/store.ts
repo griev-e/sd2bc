@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { supabase } from "./supabase";
 import { localDateISO } from "./format";
-import { fetchRoute, primeRouteCache } from "./osrm";
+import { fetchRoute, NoRouteError, primeRouteCache } from "./osrm";
 import {
   enqueueOutbox,
   flushOutbox,
@@ -67,10 +67,8 @@ interface TripState {
   init: (userId: string) => Promise<void>;
   teardown: () => void;
 
-  /** Debounced route recompute — for callers outside the store (e.g. shaping). */
+  /** Debounced route recompute — for callers outside the store (e.g. a retry). */
   refreshRoutes: () => void;
-  /** Full refetch + reconcile — for callers that bypassed the mutations (shaping). */
-  resync: () => Promise<void>;
   dismissToast: () => void;
 
   setSelectedDay: (dayId: string | null) => void;
@@ -390,13 +388,27 @@ export const useTrip = create<TripState>((set, get) => {
       while (cursor < ordered.length && run === routeRun) {
         const i = cursor++;
         const day = ordered[i];
-        try {
-          const route = await computeDayRoute(day, i > 0 ? ordered[i - 1] : null, stops, viaPoints);
-          if (run !== routeRun) return; // superseded by a newer edit
-          next[day.id] = route;
-          set({ routes: { ...get().routes, [day.id]: route } });
-        } catch (err) {
-          firstError ??= err;
+        const prevDay = i > 0 ? ordered[i - 1] : null;
+        // One retry, and only for a transient failure (the public OSRM demo
+        // server rate-limits and drops connections). Without it a single
+        // hiccup leaves this day showing its previous distance and drive time
+        // as though nothing had changed — worse than a visible error, because
+        // the stale number looks authoritative.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const route = await computeDayRoute(day, prevDay, stops, viaPoints);
+            if (run !== routeRun) return; // superseded by a newer edit
+            next[day.id] = route;
+            set({ routes: { ...get().routes, [day.id]: route } });
+            break;
+          } catch (err) {
+            if (attempt === 1 || err instanceof NoRouteError) {
+              firstError ??= err;
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 1200));
+            if (run !== routeRun) return;
+          }
         }
       }
     };
@@ -694,7 +706,6 @@ export const useTrip = create<TripState>((set, get) => {
     },
 
     refreshRoutes: () => scheduleRoutes(),
-    resync: () => refetchAll(),
     dismissToast: () => set({ toast: null }),
 
     setSelectedDay: (dayId) => set({ selectedDayId: dayId }),
@@ -837,33 +848,75 @@ export const useTrip = create<TripState>((set, get) => {
     addViaPoint: async (afterStopId, lng, lat, seq) => {
       const s = get();
       if (!s.trip) return;
+      const prevVias = s.viaPoints;
+
+      // A stop's shaping points all live in the one gap that follows it, so
+      // `seq` is a plain insertion index within them. Renumbering the ones at
+      // or after that index happens in the SAME optimistic update as the
+      // insert — split across an awaited round trip, the 500ms route debounce
+      // would fire in between and recompute (and show) the day's drive time
+      // with the detour in the wrong place. Re-indexing from 0 also closes any
+      // gaps a previous delete left behind.
+      const gap = prevVias
+        .filter((v) => v.after_stop_id === afterStopId)
+        .sort((a, b) => a.seq - b.seq);
+      const at = Math.max(0, Math.min(seq, gap.length));
+      const shifted = new Map<string, number>();
+      gap.forEach((v, i) => {
+        const next = i < at ? i : i + 1;
+        if (next !== v.seq) shifted.set(v.id, next);
+      });
+
       const row: ViaPoint = {
         id: crypto.randomUUID(),
         trip_id: s.trip.id,
         after_stop_id: afterStopId,
-        seq,
+        seq: at,
         lat,
         lng,
         created_by: s.userId,
         created_at: new Date().toISOString(),
       };
-      set({ viaPoints: [...s.viaPoints, row] });
+      set({
+        viaPoints: [
+          ...prevVias.map((v) => {
+            const next = shifted.get(v.id);
+            return next === undefined ? v : { ...v, seq: next };
+          }),
+          row,
+        ],
+      });
       scheduleRoutes();
+
       const payload = {
         id: row.id,
         trip_id: row.trip_id,
         after_stop_id: afterStopId,
-        seq,
+        seq: at,
         lat,
         lng,
         created_by: s.userId,
       };
-      const result = await runWrite(
-        () => supabase().from("via_points").insert(payload),
-        { table: "via_points", op: "insert", values: payload },
-      );
-      if (result === "error") {
-        set({ viaPoints: get().viaPoints.filter((v) => v.id !== row.id) });
+      const results = await Promise.all([
+        runWrite(() => supabase().from("via_points").insert(payload), {
+          table: "via_points",
+          op: "insert",
+          values: payload,
+        }),
+        ...[...shifted].map(([id, next]) =>
+          runWrite(() => supabase().from("via_points").update({ seq: next }).eq("id", id), {
+            table: "via_points",
+            op: "update",
+            id,
+            values: { seq: next },
+          }),
+        ),
+      ]);
+      if (results.includes("error")) {
+        // The insert and the renumbering are one edit — a partial failure
+        // would leave the gap ordered differently here than in the DB, so drop
+        // the whole thing and let Realtime reconcile.
+        set({ viaPoints: prevVias });
         scheduleRoutes();
       }
     },
