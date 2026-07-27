@@ -106,7 +106,10 @@ export async function fetchRoute(points: LngLat[]): Promise<OsrmRoute> {
 
     const coordStr = points.map((p) => `${p[0]},${p[1]}`).join(";");
     const url = `${OSRM_URL}/route/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=false&continue_straight=false`;
-    const res = await fetch(url);
+    // hard timeout: a fetch that never settles on flaky cell data would pin
+    // this key in `inflight` and hold a computeRoutes worker slot forever,
+    // leaving the "routing…" pill up with no error and no retry
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`OSRM ${res.status}`);
     const json = await res.json();
     if (json.code !== "Ok" || !json.routes?.[0]) {

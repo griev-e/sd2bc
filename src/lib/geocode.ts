@@ -46,7 +46,12 @@ function kindFromOsm(category?: string, type?: string): StopKind {
 /** Free-text place search via Nominatim (OSM). Keyless; used sparingly. */
 export async function geocode(query: string): Promise<GeocodeResult[]> {
   const url = `${NOMINATIM_URL}/search?format=jsonv2&limit=6&countrycodes=us,ca&q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  // timeout so a dead-zone search resolves (callers catch and show "no
+  // results") instead of spinning until the browser gives up
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) return [];
   const json = (await res.json()) as {
     display_name: string;
@@ -56,6 +61,7 @@ export async function geocode(query: string): Promise<GeocodeResult[]> {
     category?: string;
     type?: string;
   }[];
+  if (!Array.isArray(json)) return [];
   return json.map((r) => ({
     name: r.name && r.name.length > 0 ? r.name : r.display_name.split(",")[0],
     lat: parseFloat(r.lat),
@@ -87,7 +93,10 @@ export async function reverseGeocode(
   try {
     const zoom = opts?.zoom != null ? `&zoom=${opts.zoom}` : "";
     const url = `${NOMINATIM_URL}/reverse?format=jsonv2&lat=${lat}&lon=${lng}${zoom}`;
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!res.ok) return null;
     const json = (await res.json()) as { name?: string; display_name?: string };
     const label = json.display_name;
