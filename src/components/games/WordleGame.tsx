@@ -6,6 +6,7 @@ import { riseIn, SPRING } from "@/lib/motion";
 import { useTrip } from "@/lib/store";
 import { WORDLE_WORDS } from "@/lib/gameData";
 import {
+  isValidGuess,
   keyStates,
   MAX_GUESSES,
   pickWord,
@@ -61,6 +62,20 @@ export default function WordleGame() {
   const recorded = useRef(false);
   const shake = useAnimationControls();
 
+  // the ~14.9k-word guess dictionary is fetched as its own chunk (only Wordle
+  // players pay for it) and merged with the curated answer bank, since every
+  // answer must also be a legal guess.
+  const [dictionary, setDictionary] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void import("@/lib/wordleDictionary").then(({ WORDLE_DICTIONARY }) => {
+      if (!cancelled) setDictionary(new Set([...WORDLE_WORDS, ...WORDLE_DICTIONARY]));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const scored = useMemo(
     () => guesses.map((g) => ({ guess: g, states: scoreGuess(g, answer) })),
     [guesses, answer],
@@ -102,6 +117,15 @@ export default function WordleGame() {
     if (current.length !== WORD_LENGTH) {
       void shake.start({ x: [0, -8, 8, -6, 6, 0], transition: { duration: 0.4 } });
       flash(`${WORD_LENGTH} letters, please`);
+      return;
+    }
+    if (!dictionary) {
+      flash("Loading word list…");
+      return;
+    }
+    if (!isValidGuess(current, dictionary)) {
+      void shake.start({ x: [0, -8, 8, -6, 6, 0], transition: { duration: 0.4 } });
+      flash("Not in word list");
       return;
     }
     const g = current.toUpperCase();

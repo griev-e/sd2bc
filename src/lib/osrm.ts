@@ -24,6 +24,31 @@ export function routeCacheKey(points: LngLat[]): string {
 }
 
 /**
+ * The public OSRM demo's car profile runs consistently slow against reality on
+ * US highways (its default speeds are conservative and unaware of traffic
+ * flow): Apple/Google quote ~4h where it says ~4.5h on the Santa Barbara →
+ * Big Sur leg. ETAs feed the whole schedule, so trim durations ~10% to match
+ * what the navigation apps (and the actual car) will say.
+ *
+ * Applied at the conversion boundary only — `route_cache` rows and OSRM
+ * responses stay raw, so both phones and any future re-calibration read the
+ * same untouched source data. Distances are geometric truth and untouched.
+ */
+export const DRIVE_TIME_CALIBRATION = 0.9;
+
+function calibrate(route: OsrmRoute): OsrmRoute {
+  return {
+    coordinates: route.coordinates,
+    legs: route.legs.map((l) => ({
+      distance: l.distance,
+      duration: l.duration * DRIVE_TIME_CALIBRATION,
+    })),
+    distance: route.distance,
+    duration: route.duration * DRIVE_TIME_CALIBRATION,
+  };
+}
+
+/**
  * OSRM answered, it just can't connect these waypoints (a point snapped to an
  * island, a ferry-only hop). Deterministic — retrying the same request only
  * spends someone else's server time.
@@ -41,13 +66,14 @@ interface RouteCacheRow {
   duration_s: number | string;
 }
 
+/** Cache rows hold raw OSRM values — calibration happens here, exactly once. */
 function rowToRoute(row: RouteCacheRow): OsrmRoute {
-  return {
+  return calibrate({
     coordinates: row.geometry,
     legs: row.legs,
     distance: Number(row.distance_m),
     duration: Number(row.duration_s),
-  };
+  });
 }
 
 /**
@@ -122,7 +148,8 @@ export async function fetchRoute(points: LngLat[]): Promise<OsrmRoute> {
       throw new NoRouteError(`OSRM: ${json.code ?? "no route"}`);
     }
     const r = json.routes[0];
-    const route: OsrmRoute = {
+    // raw, as OSRM said it — this is what the shared cache stores
+    const raw: OsrmRoute = {
       coordinates: r.geometry.coordinates as LngLat[],
       legs: (r.legs as OsrmLeg[]).map((l) => ({
         distance: l.distance,
@@ -131,20 +158,23 @@ export async function fetchRoute(points: LngLat[]): Promise<OsrmRoute> {
       distance: r.distance,
       duration: r.duration,
     };
-    memCache.set(key, route);
 
-    // Fire-and-forget: share the computed route with the other phone.
+    // Fire-and-forget: share the computed route with the other phone. Raw
+    // values on purpose — rowToRoute calibrates on the way out, so a cached
+    // route and a fresh one always agree.
     db.from("route_cache")
       .upsert({
         key,
-        geometry: route.coordinates,
-        legs: route.legs,
-        distance_m: route.distance,
-        duration_s: route.duration,
+        geometry: raw.coordinates,
+        legs: raw.legs,
+        distance_m: raw.distance,
+        duration_s: raw.duration,
         updated_at: new Date().toISOString(),
       })
       .then(() => {});
 
+    const route = calibrate(raw);
+    memCache.set(key, route);
     return route;
   })();
 
