@@ -65,6 +65,7 @@ src/
       overpass/route.ts   # hedged Overpass proxy (needs a real User-Agent)
       pin-login/route.ts  # shared-PIN → Supabase magic-link (uses secret key)
       analyze/route.ts    # AI trip analyzer → Anthropic API (uses ANTHROPIC_API_KEY)
+      car-price/route.ts  # MSRP fallback for the cars game → Haiku (uses ANTHROPIC_API_KEY)
   components/              # UI: MapView, Sheet, *Sheet editors, BottomNav, Icons, games/
   lib/                    # all non-UI logic (see below)
 ```
@@ -94,6 +95,9 @@ src/
 | `shaping.ts` | Insert an invisible via/shaping point on a day's route. |
 | `analysis.ts` | AI trip analyzer client half: `analysisKey()` (cache key = hash of the itinerary + budget knobs) and `buildAnalysisPayload()` (the compact snapshot `/api/analyze` feeds to Claude). |
 | `plateRank.ts` | Beli-style license-plate rating: per-person ranking document (the latest `score` game event with key `ranking:<ownerId>` — writable by either traveler, so the passenger can enter the driver's take), sentiment buckets with fixed score bands, binary-insert duel math, positional 0–10 scores, combined leaderboard. Pure. |
+| `carData.ts` | 2026 model-year car catalog for the `$$$ Cars` game: make → model → trim → base MSRP (~46 makes / 900 trims, economy through hypercar). Hand-curated because no free keyless MSRP feed exists — NHTSA vPIC has 2026 makes/models but no prices or trims. |
+| `carPrice.ts` | `$$$ Cars` domain logic: cascading make/model/trim lookups over the catalog, `catalogMsrp()` (exact hit or null — never a guess), price tiers with doubling point values (`tierOf`, `scoreFor`), `carPriceKey()` cache key, and `parseSighting()` (tolerates the game's original `{name, price}` rows). Pure. |
+| `carPriceLookup.ts` | `$$$ Cars` price resolution: catalog → memory → Supabase `car_price_cache` → `/api/car-price`. Only a catalog miss can reach the network, and only behind an explicit tap. |
 | `packingTags.ts` | Packing auto-tagging: `suggestCategory()` (learned-neighbor + curated-lexicon classifier with typo correction and a confidence score), `detectAssignee()`, `parsePackingEntries()`, `suggestRetags()`, plus the category palette/emoji. Pure and local — no network, no model. |
 | `theme.ts` | Light/dark/system preference, persisted per device. |
 | `motion.ts` | Shared Motion animation tokens (springs, fades, staggered rise). All structural animation (enter/exit, layout, sheets) uses Motion with these; micro feedback (`.pressable`, color transitions) stays CSS. `prefers-reduced-motion` is honored globally via `MotionProvider`. |
@@ -164,6 +168,15 @@ append a fresh document and delete the owner's older ones, so rankings are
 last-write-wins per owner (legacy rows with bare key `"ranking"` are still
 read via `created_by`).
 
+`$$$ Cars` is structured rather than free-text: a sighting is a year / make /
+model / trim picked from `carData.ts`, and the game prices it itself
+(`lib/carPrice.ts`, `lib/carPriceLookup.ts`) — catalog first, cached Haiku
+lookup only on a miss, manual entry always available as an override. Each
+sighting lands in a price tier worth doubling points, so the scoreboard is
+`scoreFor()` (sum of tier points), not raw dollars. Entries store the
+structured fields plus `msrp`/`source`; `parseSighting()` still reads the
+game's original `{name, price}` rows so old sightings keep ranking.
+
 ## Free-service etiquette (do not regress this)
 
 The whole app is designed to never hammer a free public endpoint:
@@ -186,6 +199,12 @@ The whole app is designed to never hammer a free public endpoint:
   so re-opens and the second phone read the cache instead of re-calling.
   `/api/analyze` is stateless; the *client* writes the cache row through the
   authenticated Supabase client (RLS applies) and Realtime syncs it across.
+- **Anthropic (Haiku)** also backs the `$$$ Cars` MSRP lookup, and the same
+  rules apply harder because it's the cheap path: the offline `carData.ts`
+  catalog answers first, only a miss reaches `/api/car-price`, that call needs
+  a deliberate tap, and every answer is written to `car_price_cache` keyed by
+  the normalized car — so a given car is priced once, ever, for both phones.
+  The route is sized to match: Haiku, a short system prompt, `max_tokens: 200`.
 
 When adding an external call: cache it (memory + Supabase for anything shared),
 debounce user-driven calls, and prefer the existing keyless endpoints in
@@ -206,7 +225,7 @@ All data access is gated by **Row Level Security** via the
 `public.is_traveler()` function — every policy requires the caller's
 `auth.uid()` to exist in `profiles`, so even a stray Supabase account created
 with the public anon key sees nothing. The anon/publishable key is meant to
-ship in the client bundle. `/api/analyze` and `/api/overpass` are gated the
+ship in the client bundle. `/api/analyze`, `/api/car-price` and `/api/overpass` are gated the
 same way server-side (`verifyTraveler()` in `lib/server/auth.ts` — clients
 send their session token as a Bearer header). `/api/pin-login` rate-limits
 guesses through the `pin_attempts` table (service-role only).
@@ -222,9 +241,10 @@ and runs with **no `.env`**. Env vars override when present:
   server-only, required for PIN sign-in (`api/pin-login`). Never expose these to
   the client or hardcode them.
 - `ANTHROPIC_API_KEY` — server-only, required for the AI trip check
-  (`api/analyze`). Same rules: never `NEXT_PUBLIC_`, never in the client
-  bundle. Without it the route answers 503 and the rest of the app is
-  unaffected.
+  (`api/analyze`) and the cars-game MSRP fallback (`api/car-price`). Same
+  rules: never `NEXT_PUBLIC_`, never in the client bundle. Without it both
+  routes answer 503 and the rest of the app is unaffected — the cars game
+  still prices everything in the 2026 catalog and accepts manual entries.
 
 ## Conventions & style
 
