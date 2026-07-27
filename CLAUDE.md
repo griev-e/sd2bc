@@ -67,6 +67,9 @@ src/
       analyze/route.ts    # AI trip analyzer → Anthropic API (uses ANTHROPIC_API_KEY)
       car-price/route.ts  # MSRP fallback for the cars game → Haiku (uses ANTHROPIC_API_KEY)
   components/              # UI: MapView, Sheet, *Sheet editors, BottomNav, Icons, games/
+                           #   MapView keeps ONE MapLibre map alive across tab
+                           #   switches (module-level singleton, detached on
+                           #   unmount, style-fetch retries) — never map.remove()
   lib/                    # all non-UI logic (see below)
 ```
 
@@ -83,7 +86,7 @@ src/
 | `directions.ts` | Keyless Google Maps directions deep link for a day's drive. |
 | `ics.ts` | Client-side iCalendar export of the itinerary (one all-day event per day). |
 | `server/auth.ts` | Server-only `verifyTraveler()` — Bearer-token gate for `/api/analyze` and `/api/overpass`. |
-| `osrm.ts` | `fetchRoute()` with memory → Supabase `route_cache` → network. |
+| `osrm.ts` | `fetchRoute()` with memory → Supabase `route_cache` → network. Durations are calibrated (`DRIVE_TIME_CALIBRATION`, −10%) on the way out — the OSRM demo runs slow vs. Apple/Google — while `route_cache` always stores raw OSRM values. |
 | `overpass.ts` | POI suggestions along a route corridor (Overpass/QLever, cached). |
 | `geo.ts` | Pure geometry: haversine, point-to-segment projection, accuracy rings, region-by-latitude, `hashKey`. |
 | `journey.ts` | The map's plan marker: stitches the day routes into one distance timeline, `positionAtDistance()`, `nearestOnJourney()` (snap a GPS fix onto the route), `liveDistance()` (where the clock says we'd be), plus the device-local vehicle-emoji pick. |

@@ -97,7 +97,7 @@ function addLocationLayers(map: MLMap) {
   });
 }
 
-/** Route source + line layers — added on load and re-added after setStyle. */
+/** Route source + line layers — added on style load and after every setStyle. */
 function addRouteLayers(map: MLMap, mode: StyleMode, dark: boolean) {
   if (map.getSource("routes")) return;
   map.addSource("routes", {
@@ -130,14 +130,180 @@ function addRouteLayers(map: MLMap, mode: StyleMode, dark: boolean) {
   });
 }
 
+/* ---- persistent map singleton --------------------------------------------
+   Rebuilding a MapLibre map costs a style fetch, glyph/tile fetches and a
+   fresh WebGL context — seconds on a phone, on every visit to the map tab.
+   Worse, on flaky cell data a single failed style fetch used to leave the tab
+   permanently blank (`load` never fires, nothing retries) until the next
+   remount. So the map is created once, DETACHED — never destroyed — when the
+   tab unmounts, and re-attached instantly on return, with camera, style,
+   tiles and markers intact.
+
+   Everything hanging off the map instance persists beside it (marker
+   registries, the plan/blip markers); the component's diffing effects refresh
+   positions and handlers on every mount. Map-level event handlers are bound
+   once and dispatch through `hooks`, which the live component instance fills
+   in on mount — a bound-once listener must never close over a dead render. */
+
+interface HostHooks {
+  longPress?: (lngLat: LngLat) => void;
+  routeTap?: (dayId: string, lngLat: LngLat) => void;
+  /** A style finished loading (first load, theme/mode swap, or a retry). */
+  styleReady?: () => void;
+}
+
+type StyleKey = "street-light" | "street-dark" | "satellite";
+
+let sharedMap: MLMap | null = null;
+const hooks: HostHooks = {};
+/** The style the map should currently be wearing (retries re-request this). */
+let desiredKey: StyleKey = "street-light";
+let styleRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let styleRetryDelay = 2_000;
+let didInitialFit = false;
+
+const persistentStopMarkers = new Map<string, { marker: Marker; dayId: string }>();
+const persistentViaMarkers = new Map<string, Marker>();
+const persistentWeatherMarkers = new Map<string, { marker: Marker; dayId: string }>();
+const suggestionMarkers: { current: Marker[] } = { current: [] };
+const journeyMarker: { current: Marker | null } = { current: null };
+const blipMarker: { current: Marker | null } = { current: null };
+
+function desiredStyleKey(): StyleKey {
+  if (localStorage.getItem(STYLE_PREF_KEY) === "satellite") return "satellite";
+  return effectiveDark() ? "street-dark" : "street-light";
+}
+
+function styleFor(key: StyleKey): string | StyleSpecification {
+  if (key === "satellite") return MAP_STYLE_SATELLITE as StyleSpecification;
+  return key === "street-dark" ? MAP_STYLE_DARK : MAP_STYLE_LIGHT;
+}
+
+/**
+ * Dead-zone resilience: when a style fetch fails the map sits blank and no
+ * event ever fires again — re-request it on a capped backoff, and instantly
+ * when the network comes back. A successful `style.load` clears all of this.
+ */
+function scheduleStyleRetry(map: MLMap) {
+  if (styleRetryTimer) return;
+  styleRetryTimer = setTimeout(() => {
+    styleRetryTimer = null;
+    if (map.isStyleLoaded()) return;
+    styleRetryDelay = Math.min(styleRetryDelay * 2, 30_000);
+    map.setStyle(styleFor(desiredKey));
+  }, styleRetryDelay);
+}
+
+function ensureSharedMap(): MLMap {
+  if (sharedMap) return sharedMap;
+
+  // The map owns its own element, appended into whichever host is mounted.
+  const el = document.createElement("div");
+  el.style.position = "absolute";
+  el.style.inset = "0";
+
+  desiredKey = desiredStyleKey();
+  const map = new maplibregl.Map({
+    container: el,
+    style: styleFor(desiredKey),
+    center: [-122.6, 40.5],
+    zoom: 4.6,
+    attributionControl: { compact: true },
+  });
+  sharedMap = map;
+
+  // test hook (harmless in production)
+  (window as unknown as { __coastlineMap?: MLMap }).__coastlineMap = map;
+
+  // One place rebuilds the layers after EVERY style arrival — initial load,
+  // street⇄satellite, theme reconcile, and failure retries alike.
+  map.on("style.load", () => {
+    styleRetryDelay = 2_000;
+    if (styleRetryTimer) {
+      clearTimeout(styleRetryTimer);
+      styleRetryTimer = null;
+    }
+    addRouteLayers(
+      map,
+      desiredKey === "satellite" ? "satellite" : "street",
+      desiredKey === "street-dark",
+    );
+    addLocationLayers(map);
+    hooks.styleReady?.();
+  });
+
+  map.on("error", (e) => {
+    // Tile/glyph noise once the style is in is not ours to handle; a failure
+    // while the style is missing means a blank map — that one we retry.
+    if (!map.isStyleLoaded()) scheduleStyleRetry(map);
+    else if (e?.error) console.warn("map error:", e.error);
+  });
+  window.addEventListener("online", () => {
+    if (sharedMap && !sharedMap.isStyleLoaded()) {
+      if (styleRetryTimer) clearTimeout(styleRetryTimer);
+      styleRetryTimer = null;
+      sharedMap.setStyle(styleFor(desiredKey));
+    }
+  });
+
+  // Tap the line → drop a shaping point in that gap. Delegated by layer id,
+  // so these survive every style swap.
+  map.on("click", "route-line", (e) => {
+    const feature = e.features?.[0];
+    if (!feature) return;
+    hooks.routeTap?.(feature.properties?.dayId as string, [e.lngLat.lng, e.lngLat.lat]);
+    e.preventDefault();
+  });
+  map.on("mouseenter", "route-line", () => (map.getCanvas().style.cursor = "pointer"));
+  map.on("mouseleave", "route-line", () => (map.getCanvas().style.cursor = ""));
+
+  // Long-press → add a real stop here.
+  let pressTimer: ReturnType<typeof setTimeout> | null = null;
+  let pressStart: { x: number; y: number } | null = null;
+  const cancel = () => {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+    pressStart = null;
+  };
+  map.on("touchstart", (e) => {
+    if (e.points.length !== 1) {
+      cancel(); // a second finger means pinch/rotate, not a long-press
+      return;
+    }
+    pressStart = { x: e.point.x, y: e.point.y };
+    const lngLat: LngLat = [e.lngLat.lng, e.lngLat.lat];
+    pressTimer = setTimeout(() => hooks.longPress?.(lngLat), 550);
+  });
+  map.on("touchmove", (e) => {
+    if (pressStart && Math.hypot(e.point.x - pressStart.x, e.point.y - pressStart.y) > 12)
+      cancel();
+  });
+  map.on("touchend", cancel);
+  // touchcancel (not touchend) fires when iOS steals the touch for a system
+  // gesture — without this the timer still fires a phantom long-press
+  map.on("touchcancel", cancel);
+  map.on("dragstart", cancel);
+
+  return map;
+}
+
 export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
-  const stopMarkers = useRef(new Map<string, { marker: Marker; dayId: string }>());
-  const viaMarkers = useRef(new Map<string, Marker>());
-  const weatherMarkers = useRef(new Map<string, { marker: Marker; dayId: string }>());
-  const suggestionMarkers = useRef<Marker[]>([]);
-  const [mapReady, setMapReady] = useState(false);
+  const stopMarkers = useRef(persistentStopMarkers);
+  const viaMarkers = useRef(persistentViaMarkers);
+  const weatherMarkers = useRef(persistentWeatherMarkers);
+  // Ready from the very first render when the persistent map is already
+  // dressed (back from another tab, same theme) — the common case after the
+  // first visit, and the reason returning to the map is instant.
+  const [mapReady, setMapReady] = useState<boolean>(
+    () =>
+      typeof window !== "undefined" &&
+      sharedMap !== null &&
+      desiredStyleKey() === desiredKey &&
+      sharedMap.isStyleLoaded() === true && // typed boolean | void upstream
+      sharedMap.getSource("routes") !== undefined,
+  );
   const [selectedVia, setSelectedVia] = useState<string | null>(null);
   const [styleMode, setStyleMode] = useState<StyleMode>(() =>
     typeof window !== "undefined" && localStorage.getItem(STYLE_PREF_KEY) === "satellite"
@@ -190,7 +356,6 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   // being torn down and rebuilt for a mere emoji swap or route recompute
   const journeyRef = useRef(journey);
   const emojiRef = useRef(vehicleEmoji(vehicleKey));
-  const journeyMarker = useRef<Marker | null>(null);
   const [showPlan, setShowPlan] = useState<boolean>(
     () => typeof window !== "undefined" && localStorage.getItem(SHOW_PLAN_KEY) === "1",
   );
@@ -202,90 +367,46 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
   // ---- live location ------------------------------------------------------
   const locStatus = useLocation((s) => s.status);
-  const blipMarker = useRef<Marker | null>(null);
   /** The status whose notice has already had its say. */
   const [noticeSeen, setNoticeSeen] = useState<LocationStatus | null>(null);
 
-  // ---- init ---------------------------------------------------------------
+  // ---- attach the persistent map -------------------------------------------
+  // The map instance outlives this component (see the singleton block above):
+  // mounting means adopting it — append its element, point the hooks at this
+  // instance, reconcile the style with whatever theme/mode changed while the
+  // tab was away, and declare readiness if the style is already in.
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    const dark = effectiveDark();
-    const initialMode: StyleMode =
-      localStorage.getItem(STYLE_PREF_KEY) === "satellite" ? "satellite" : "street";
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style:
-        initialMode === "satellite"
-          ? (MAP_STYLE_SATELLITE as StyleSpecification)
-          : dark
-            ? MAP_STYLE_DARK
-            : MAP_STYLE_LIGHT,
-      center: [-122.6, 40.5],
-      zoom: 4.6,
-      attributionControl: { compact: true },
-    });
+    const host = containerRef.current;
+    if (!host) return;
+    const map = ensureSharedMap();
     mapRef.current = map;
+    host.appendChild(map.getContainer());
+    map.resize();
 
-    // test hook (harmless in production)
-    (window as unknown as { __coastlineMap?: MLMap }).__coastlineMap = map;
-
-    map.on("load", () => {
-      addRouteLayers(map, initialMode, dark);
-      addLocationLayers(map);
-
-      // Tap the line → drop a shaping point in that gap.
-      map.on("click", "route-line", (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-        const dayId = feature.properties?.dayId as string;
-        fireRouteTap(dayId, [e.lngLat.lng, e.lngLat.lat]);
-        e.preventDefault();
-      });
-      map.on("mouseenter", "route-line", () => (map.getCanvas().style.cursor = "pointer"));
-      map.on("mouseleave", "route-line", () => (map.getCanvas().style.cursor = ""));
-
+    hooks.longPress = (lngLat) => fireLongPress(lngLat);
+    hooks.routeTap = (dayId, lngLat) => fireRouteTap(dayId, lngLat);
+    hooks.styleReady = () => {
       setMapReady(true);
-    });
-
-    // Long-press → add a real stop here.
-    let pressTimer: ReturnType<typeof setTimeout> | null = null;
-    let pressStart: { x: number; y: number } | null = null;
-    const cancel = () => {
-      if (pressTimer) clearTimeout(pressTimer);
-      pressTimer = null;
-      pressStart = null;
+      setStyleEpoch((e) => e + 1); // data-dependent effects re-apply
     };
-    map.on("touchstart", (e) => {
-      if (e.points.length !== 1) {
-        cancel(); // a second finger means pinch/rotate, not a long-press
-        return;
-      }
-      pressStart = { x: e.point.x, y: e.point.y };
-      const lngLat: LngLat = [e.lngLat.lng, e.lngLat.lat];
-      pressTimer = setTimeout(() => fireLongPress(lngLat), 550);
-    });
-    map.on("touchmove", (e) => {
-      if (pressStart && Math.hypot(e.point.x - pressStart.x, e.point.y - pressStart.y) > 12) cancel();
-    });
-    map.on("touchend", cancel);
-    // touchcancel (not touchend) fires when iOS steals the touch for a system
-    // gesture — without this the timer still fires a phantom long-press
-    map.on("touchcancel", cancel);
-    map.on("dragstart", cancel);
 
-    const sm = stopMarkers.current;
-    const vm = viaMarkers.current;
-    const wm = weatherMarkers.current;
+    // Theme/mode may have changed while the map was away — swap and wait for
+    // styleReady. Otherwise mapReady's initializer already said yes, or the
+    // first load / its dead-zone retry is in flight and styleReady will fire.
+    const wanted = desiredStyleKey();
+    if (wanted !== desiredKey) {
+      desiredKey = wanted;
+      map.setStyle(styleFor(wanted));
+    }
+
     return () => {
-      map.remove();
+      hooks.longPress = undefined;
+      hooks.routeTap = undefined;
+      hooks.styleReady = undefined;
+      map.getContainer().remove(); // detach, never destroy
       mapRef.current = null;
-      sm.clear();
-      vm.clear();
-      wm.clear();
-      journeyMarker.current = null;
-      blipMarker.current = null;
     };
-     
+
   }, []);
 
 
@@ -330,38 +451,18 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
   }, [routes, selectedDayId, mapReady, orderedDays, styleEpoch]);
 
   // ---- street ⇄ satellite ---------------------------------------------------
-  // the not-yet-fired style.load handler from the previous toggle, if any
-  const pendingStyleLoad = useRef<(() => void) | null>(null);
+  // setStyle wipes sources/layers; the singleton's persistent style.load
+  // handler rebuilds them (with the palette from desiredKey) and pings
+  // styleReady, which bumps styleEpoch so the data effects re-apply.
   const toggleStyle = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
     const next: StyleMode = styleMode === "street" ? "satellite" : "street";
     setStyleMode(next);
     localStorage.setItem(STYLE_PREF_KEY, next);
-    const dark = effectiveDark();
-    // setStyle wipes sources/layers; rebuild them once the new style is in.
-    // Listen BEFORE calling setStyle — inline style objects (satellite) can
-    // finish loading synchronously, so a later .once() would miss the event
-    // and the route line would vanish until the map remounts.
-    // A rapid double-toggle can leave the previous once() still armed; both
-    // would fire on the final style.load and the stale one wins the layer
-    // creation with the wrong palette — drop it first.
-    if (pendingStyleLoad.current) map.off("style.load", pendingStyleLoad.current);
-    const onStyleLoad = () => {
-      pendingStyleLoad.current = null;
-      addRouteLayers(map, next, dark);
-      addLocationLayers(map);
-      setStyleEpoch((e) => e + 1);
-    };
-    pendingStyleLoad.current = onStyleLoad;
-    map.once("style.load", onStyleLoad);
-    map.setStyle(
-      next === "satellite"
-        ? (MAP_STYLE_SATELLITE as StyleSpecification)
-        : dark
-          ? MAP_STYLE_DARK
-          : MAP_STYLE_LIGHT,
-    );
+    desiredKey =
+      next === "satellite" ? "satellite" : effectiveDark() ? "street-dark" : "street-light";
+    map.setStyle(styleFor(desiredKey));
   }, [styleMode]);
 
   // ---- selected-day draw-on -------------------------------------------------
@@ -451,13 +552,12 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     drawAnim.current.raf = requestAnimationFrame(tick);
 
     return () => {
-      // guard: on unmount the init effect's cleanup has already torn the map down
-      if (mapRef.current !== map) return;
+      // the map outlives this component now — the sweep overlay must not
       if (drawAnim.current) {
         cancelAnimationFrame(drawAnim.current.raf);
         drawAnim.current = null;
       }
-      removeOverlay();
+      if (map.getStyle()) removeOverlay(); // no style mid-swap = nothing to remove
     };
     // routes/orderedDays deliberately absent — a route recompute or day edit
     // must not replay the sweep; the sync effect above keeps the data fresh
@@ -874,11 +974,12 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     });
   }, [selectedStopId, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // initial fit once routes + stops exist
-  const didInitialFit = useRef(false);
+  // Initial fit once stops exist — once per app session, not per visit: the
+  // persistent map keeps its camera, and stomping it on every return to the
+  // tab would throw away wherever the traveler had panned.
   useEffect(() => {
-    if (!didInitialFit.current && mapReady && stops.length > 0) {
-      didInitialFit.current = true;
+    if (!didInitialFit && mapReady && stops.length > 0) {
+      didInitialFit = true;
       fitTrip();
     }
   }, [mapReady, stops, fitTrip]);
