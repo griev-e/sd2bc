@@ -34,7 +34,11 @@ phones, progressive cost forecasting — built on entirely free, keyless service
   with no food or fuel stop. Results are cached in Supabase keyed by a hash of
   the trip state, so re-opens and the second phone never re-call the API.
 - **Packing** — pre-seeded shared checklist, assignment (me / her / shared),
-  attribution dots, live sync.
+  attribution dots, live sync. Items auto-tag as you type: a local classifier
+  reads the label ("sunscren", "kev's camera charger", a whole pasted list) and
+  picks the category — learning from how this list already files things,
+  falling back to a curated road-trip lexicon — plus a one-tap pass that
+  re-files anything sitting in the wrong section.
 - **Realtime** — every table syncs between both phones via Supabase Realtime
   with optimistic updates (last-write-wins).
 - **Two accounts max** — enforced in the signup edge function *and* a database
