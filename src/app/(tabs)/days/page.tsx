@@ -43,6 +43,8 @@ import type { Day, DayRoute, Stop } from "@/lib/types";
 export default function DaysPage() {
   const routes = useTrip((s) => s.routes);
   const routesPending = useTrip((s) => s.routesPending);
+  const routeError = useTrip((s) => s.routeError);
+  const refreshRoutes = useTrip((s) => s.refreshRoutes);
   const addDay = useTrip((s) => s.addDay);
 
   const orderedDays = useOrderedDays();
@@ -79,6 +81,17 @@ export default function DaysPage() {
               label={routesPending ? "days · updating…" : "days"}
             />
           </div>
+          {/* Routing failed, so every mileage and drive time below is whatever
+              it was before the last edit — say so rather than let a stale
+              number read as current. */}
+          {routeError && !routesPending && (
+            <button
+              onClick={refreshRoutes}
+              className="pressable mt-2.5 w-full rounded-xl bg-danger/10 px-3 py-2 text-[11px] font-semibold text-danger"
+            >
+              Drive times couldn&apos;t update · Retry
+            </button>
+          )}
         </div>
       </header>
 

@@ -23,6 +23,13 @@ export function routeCacheKey(points: LngLat[]): string {
   );
 }
 
+/**
+ * OSRM answered, it just can't connect these waypoints (a point snapped to an
+ * island, a ferry-only hop). Deterministic — retrying the same request only
+ * spends someone else's server time.
+ */
+export class NoRouteError extends Error {}
+
 const memCache = new Map<string, OsrmRoute>();
 const inflight = new Map<string, Promise<OsrmRoute>>();
 
@@ -103,7 +110,7 @@ export async function fetchRoute(points: LngLat[]): Promise<OsrmRoute> {
     if (!res.ok) throw new Error(`OSRM ${res.status}`);
     const json = await res.json();
     if (json.code !== "Ok" || !json.routes?.[0]) {
-      throw new Error(`OSRM: ${json.code ?? "no route"}`);
+      throw new NoRouteError(`OSRM: ${json.code ?? "no route"}`);
     }
     const r = json.routes[0];
     const route: OsrmRoute = {
