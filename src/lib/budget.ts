@@ -9,7 +9,7 @@ import {
   type SeedInputs,
 } from "./costs";
 import { regionOf, type Region } from "./geo";
-import type { Day, DayRoute, ExpenseCategory, Stop, Trip } from "./types";
+import { bySeq, type Day, type DayRoute, type ExpenseCategory, type Stop, type Trip } from "./types";
 
 /*
   The whole budget forecast in one pure function — shared by the Budget tab
@@ -38,7 +38,7 @@ export function computeBudget(
 ): BudgetForecast {
   const mpg = trip?.mpg ?? 28;
   const travelers = trip?.travelers ?? 2;
-  const orderedDays = [...days].sort((a, b) => a.seq - b.seq);
+  const orderedDays = [...days].sort(bySeq);
   const stopById = new Map(stops.map((s) => [s.id, s]));
 
   const milesByRegion: Record<Region, number> = { CA: 0, OR: 0, WA: 0, BC: 0 };

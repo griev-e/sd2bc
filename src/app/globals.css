@@ -296,11 +296,16 @@ body {
   color: var(--fg-muted);
 }
 
-.text-gradient {
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+/* Invisible tap-area extender: keeps compact pills and small round buttons
+   visually as they are while pushing their effective touch target toward
+   44px — this app is driven one-handed by a passenger in a moving car. */
+.hit-target {
+  position: relative;
+}
+.hit-target::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
 }
 
 /* ---- motion ----------------------------------------------------------- */

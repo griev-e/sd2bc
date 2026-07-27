@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dayRoutePoints, nextStopSeq, routeGeometryChanged, shiftDate } from "./store";
-import type { Day, Stop, ViaPoint } from "./types";
+import { dayRoutePoints, nextStopSeq, routeGeometryChanged, shiftDate, sortDays } from "./store";
+import { bySeq, type Day, type Stop, type ViaPoint } from "./types";
 
 function makeDay(id: string, seq: number): Day {
   return {
@@ -110,6 +110,23 @@ describe("dayRoutePoints", () => {
   it("returns an empty list when the day has no stops", () => {
     const day = makeDay("day1", 1);
     expect(dayRoutePoints(day, null, [], [])).toEqual([]);
+  });
+});
+
+describe("bySeq", () => {
+  it("orders by seq when seqs are unique", () => {
+    const days = [makeDay("b", 2), makeDay("a", 1)];
+    expect(sortDays(days).map((d) => d.id)).toEqual(["a", "b"]);
+  });
+
+  it("breaks seq ties by id, regardless of array order", () => {
+    // both phones adding to the same list inside a Realtime round trip mint
+    // the same max+1 seq; each phone holds the rows in a different insertion
+    // order — the sort must still converge to one answer everywhere
+    const mine = makeStop("aaa", "day1", 2, 0, 0);
+    const theirs = makeStop("zzz", "day1", 2, 0, 0);
+    expect([mine, theirs].sort(bySeq).map((s) => s.id)).toEqual(["aaa", "zzz"]);
+    expect([theirs, mine].sort(bySeq).map((s) => s.id)).toEqual(["aaa", "zzz"]);
   });
 });
 

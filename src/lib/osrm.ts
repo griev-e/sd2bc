@@ -67,10 +67,13 @@ export async function primeRouteCache(pointLists: LngLat[][]): Promise<void> {
   ];
   if (keys.length < 2) return; // a lone lookup is no cheaper batched
   try {
+    // bounded like every other network call here — computeRoutes awaits this
+    // before any worker starts, so a stalled read would wedge all routing
     const { data } = await supabase()
       .from("route_cache")
       .select("key, geometry, legs, distance_m, duration_s")
-      .in("key", keys);
+      .in("key", keys)
+      .abortSignal(AbortSignal.timeout(10_000));
     for (const row of (data ?? []) as RouteCacheRow[]) {
       memCache.set(row.key, rowToRoute(row));
     }
@@ -92,10 +95,13 @@ export async function fetchRoute(points: LngLat[]): Promise<OsrmRoute> {
 
   const p = (async () => {
     const db = supabase();
+    // a timed-out cache read resolves { data: null } (postgrest never rejects
+    // on abort) — indistinguishable from a miss, so it falls through to OSRM
     const { data } = await db
       .from("route_cache")
       .select("geometry, legs, distance_m, duration_s")
       .eq("key", key)
+      .abortSignal(AbortSignal.timeout(10_000))
       .maybeSingle();
 
     if (data) {
@@ -106,7 +112,10 @@ export async function fetchRoute(points: LngLat[]): Promise<OsrmRoute> {
 
     const coordStr = points.map((p) => `${p[0]},${p[1]}`).join(";");
     const url = `${OSRM_URL}/route/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=false&continue_straight=false`;
-    const res = await fetch(url);
+    // hard timeout: a fetch that never settles on flaky cell data would pin
+    // this key in `inflight` and hold a computeRoutes worker slot forever,
+    // leaving the "routing…" pill up with no error and no retry
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`OSRM ${res.status}`);
     const json = await res.json();
     if (json.code !== "Ok" || !json.routes?.[0]) {

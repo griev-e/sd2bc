@@ -2,6 +2,7 @@
 
 import { distToSegmentM, type LngLat } from "./geo";
 import { dayRoutePoints, useTrip } from "./store";
+import { bySeq } from "./types";
 
 /**
  * Drop an invisible shaping (via) point on a day's route at the tapped
@@ -13,7 +14,7 @@ import { dayRoutePoints, useTrip } from "./store";
  */
 export async function insertShapingPoint(dayId: string, lngLat: LngLat): Promise<void> {
   const s = useTrip.getState();
-  const ordered = [...s.days].sort((a, b) => a.seq - b.seq);
+  const ordered = [...s.days].sort(bySeq);
   const idx = ordered.findIndex((d) => d.id === dayId);
   if (idx === -1) return;
 

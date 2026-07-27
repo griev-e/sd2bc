@@ -55,11 +55,6 @@ export function scoreGuess(guess: string, answer: string): LetterState[] {
   return states;
 }
 
-/** True when every tile is green — the win condition. */
-export function isWin(states: LetterState[]): boolean {
-  return states.every((s) => s === "correct");
-}
-
 // Green beats yellow beats grey — a letter's keyboard hint only ever improves
 // as more guesses land, never downgrades (a later grey can't un-green a key).
 const RANK: Record<LetterState, number> = { correct: 3, present: 2, absent: 1 };

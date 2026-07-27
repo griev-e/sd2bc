@@ -9,7 +9,7 @@ import {
   nightCost,
 } from "./costs";
 import { WEATHER_LABEL, weatherKind, type DayWeather } from "./weather";
-import type { Day, DayRoute, Stop, Trip, ViaPoint } from "./types";
+import { bySeq, type Day, type DayRoute, type Stop, type Trip, type ViaPoint } from "./types";
 
 /*
   AI trip analyzer — the pure client half. Builds the compact JSON snapshot
@@ -75,7 +75,7 @@ export interface AnalyzePayload {
 const M_PER_MI = 1609.344;
 
 function sortedDays(days: Day[]): Day[] {
-  return [...days].sort((a, b) => a.seq - b.seq);
+  return [...days].sort(bySeq);
 }
 
 /**
@@ -105,7 +105,7 @@ export function analysisKey(
     parts.push(`d:${day.seq}|${day.date}`);
     const dayStops = stops
       .filter((s) => s.day_id === day.id)
-      .sort((a, b) => a.seq - b.seq);
+      .sort(bySeq);
     for (const s of dayStops) {
       parts.push(
         `s:${s.seq}|${s.name}|${s.kind}|${s.lat.toFixed(5)},${s.lng.toFixed(5)}|` +
@@ -115,7 +115,7 @@ export function analysisKey(
     }
   }
   // via points bend routes (and therefore miles), so they shape the analysis
-  for (const v of [...viaPoints].sort((a, b) => a.seq - b.seq)) {
+  for (const v of [...viaPoints].sort(bySeq)) {
     parts.push(`v:${v.after_stop_id}|${v.seq}|${v.lat.toFixed(5)},${v.lng.toFixed(5)}`);
   }
   return "analysis-v1-" + hashKey(parts.join("\n"));
@@ -148,7 +148,7 @@ export function buildAnalysisPayload(
   const outDays: AnalyzeDay[] = ordered.map((day) => {
     const dayStops = stops
       .filter((s) => s.day_id === day.id)
-      .sort((a, b) => a.seq - b.seq);
+      .sort(bySeq);
     const route = routes[day.id];
     const legs = (route?.segments ?? []).map((seg) => ({
       from: stopById.get(seg.fromStopId)?.name ?? "?",

@@ -256,7 +256,7 @@ function DayCard({
         <button
           onClick={() => setEmojiOpen(true)}
           aria-label={`Change Day ${day.seq} icon`}
-          className="pressable flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border bg-bg-elevated text-lg leading-none"
+          className="pressable hit-target flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border bg-bg-elevated text-lg leading-none"
           style={{ borderColor: color }}
         >
           {dayEmoji(day.id, day.emoji)}
@@ -605,7 +605,7 @@ function SortableStop({
           {...listeners}
           onClick={(e) => e.stopPropagation()}
           aria-label="Reorder"
-          className="flex h-10 w-8 cursor-grab touch-none items-center justify-center text-fg-faint"
+          className="flex w-11 cursor-grab touch-none items-center justify-center self-stretch text-fg-faint"
         >
           <IconGrip size={15} />
         </button>

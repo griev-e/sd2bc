@@ -119,7 +119,7 @@ export default function MapPage() {
         <div className="no-scrollbar pointer-events-auto mx-auto mt-2.5 flex max-w-md gap-1.5 overflow-x-auto px-4 pb-1">
           <button
             onClick={() => setSelectedDay(null)}
-            className={`glass pressable flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold ${
+            className={`glass pressable hit-target flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold ${
               selectedDayId === null ? "text-accent" : "text-fg-muted"
             }`}
           >
@@ -129,7 +129,7 @@ export default function MapPage() {
             <button
               key={d.id}
               onClick={() => setSelectedDay(selectedDayId === d.id ? null : d.id)}
-              className={`glass pressable flex flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold ${
+              className={`glass pressable hit-target flex flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold ${
                 selectedDayId === d.id ? "text-accent" : "text-fg-muted"
               }`}
             >
@@ -147,7 +147,7 @@ export default function MapPage() {
           <div className="pointer-events-none mx-auto mt-2 flex max-w-md justify-center px-4">
             <button
               onClick={() => setSelectedStop(todayNext.stop.id)}
-              className="glass pressable pointer-events-auto max-w-full truncate rounded-full px-3.5 py-1.5 text-xs text-fg-muted"
+              className="glass pressable hit-target pointer-events-auto max-w-full truncate rounded-full px-3.5 py-1.5 text-xs text-fg-muted"
             >
               <span className="font-semibold text-accent">Today</span>
               {" · next "}

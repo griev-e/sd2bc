@@ -1,3 +1,19 @@
+/**
+ * The one comparator for every seq-ordered list (days, stops within a day,
+ * via points within a gap, packing within a category). Ties are real: both
+ * phones adding to the same list inside a Realtime round trip mint the same
+ * max+1 seq, and Postgres returns ties in arbitrary order on every refetch —
+ * so without a deterministic tie-break the two phones can disagree on stop
+ * order (and therefore route, ETAs, and budget miles) until someone reorders
+ * by hand. Breaking ties by id makes every sort site converge everywhere.
+ */
+export function bySeq(
+  a: { seq: number; id: string },
+  b: { seq: number; id: string },
+): number {
+  return a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
 export type StopKind =
   | "stop"
   | "scenic"

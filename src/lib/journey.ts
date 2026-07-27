@@ -20,7 +20,7 @@
 import { closestOnSegment, haversineM, type LngLat } from "./geo";
 import { localDateISO } from "./format";
 import { DAY_START_MIN, type StopSchedule } from "./schedule";
-import type { Day, DayRoute, Stop } from "./types";
+import { bySeq, type Day, type DayRoute, type Stop } from "./types";
 
 /* ---- vehicle preference (device-local, like theme) --------------------- */
 
@@ -271,7 +271,7 @@ export function liveDistance(
 
   const dayStops = stops
     .filter((s) => s.day_id === day.id)
-    .sort((a, b) => a.seq - b.seq);
+    .sort(bySeq);
   const first = dayStops[0];
   const last = dayStops[dayStops.length - 1];
   // day one departs from the origin's own clock; later days from 9:00

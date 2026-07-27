@@ -30,7 +30,7 @@ import {
   type TagPerson,
 } from "@/lib/packingTags";
 import { useTrip } from "@/lib/store";
-import type { PackingItem, Profile } from "@/lib/types";
+import { bySeq, type PackingItem, type Profile } from "@/lib/types";
 
 type AssignFilter = "all" | "me" | "partner" | "shared";
 
@@ -88,7 +88,7 @@ export default function PackingPage() {
 
   const groups = useMemo(() => {
     const m = new Map<string, typeof packing>();
-    for (const item of [...filtered].sort((a, b) => a.seq - b.seq)) {
+    for (const item of [...filtered].sort(bySeq)) {
       const list = m.get(item.category) ?? [];
       list.push(item);
       m.set(item.category, list);

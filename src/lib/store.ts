@@ -9,23 +9,25 @@ import {
   enqueueOutbox,
   flushOutbox,
   isNetworkError,
+  isTransientStatus,
   outboxSize,
   type OutboxOp,
 } from "./outbox";
 import type { LngLat } from "./geo";
-import type {
-  ActivityEntry,
-  AnalysisInsight,
-  Day,
-  DayRoute,
-  GameEvent,
-  PackingItem,
-  Profile,
-  RouteSegment,
-  Stop,
-  Trip,
-  TripAnalysis,
-  ViaPoint,
+import {
+  bySeq,
+  type ActivityEntry,
+  type AnalysisInsight,
+  type Day,
+  type DayRoute,
+  type GameEvent,
+  type PackingItem,
+  type Profile,
+  type RouteSegment,
+  type Stop,
+  type Trip,
+  type TripAnalysis,
+  type ViaPoint,
 } from "./types";
 
 type Tables =
@@ -135,10 +137,14 @@ let onlineHandler: (() => void) | null = null;
 // can't stomp state an optimistic write is about to confirm.
 let pendingWrites = 0;
 let toastSeq = 0;
+// Single-shot retry armed whenever the outbox couldn't drain — an always-
+// foreground phone gets no visibility/online/resubscribe trigger, so without
+// this a queued write could sit unsynced for hours.
+let outboxRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Days in itinerary order (by seq). */
 export function sortDays(days: Day[]): Day[] {
-  return [...days].sort((a, b) => a.seq - b.seq);
+  return [...days].sort(bySeq);
 }
 
 /** Memoized `sortDays` over the live store — the app's most-repeated derive. */
@@ -156,7 +162,7 @@ export function shiftDate(iso: string, n: number): string {
   return localDateISO(d);
 }
 function sortStops(stops: Stop[]): Stop[] {
-  return [...stops].sort((a, b) => a.seq - b.seq);
+  return [...stops].sort(bySeq);
 }
 
 /** Next seq for a new stop in a day: max(existing) + 1, never count + 1 — deletions leave gaps. */
@@ -251,7 +257,7 @@ export function dayRoutePoints(
   }
   const viasFor = (stopId: string): RoutePoint[] =>
     (viasByStop.get(stopId) ?? [])
-      .sort((a, b) => a.seq - b.seq)
+      .sort(bySeq)
       .map((v) => ({ lngLat: [v.lng, v.lat] as LngLat, stopId: null, viaId: v.id }));
 
   const points: RoutePoint[] = [];
@@ -284,6 +290,15 @@ export const useTrip = create<TripState>((set, get) => {
     set({ toast: { id: ++toastSeq, text, kind } });
   }
 
+  /** Arm one retry of the flush-then-reconcile path (no-op if already armed). */
+  function scheduleOutboxRetry(delayMs = 20_000) {
+    if (outboxRetryTimer) return;
+    outboxRetryTimer = setTimeout(() => {
+      outboxRetryTimer = null;
+      if (get().loaded) void refetchAll();
+    }, delayMs);
+  }
+
   /**
    * Run one persistence call. Every mutation goes through here so that
    * (a) refetchAll can wait for in-flight writes, and (b) a failure caused by
@@ -292,21 +307,35 @@ export const useTrip = create<TripState>((set, get) => {
    * roll back ONLY on "error".
    */
   async function runWrite(
-    exec: () => PromiseLike<{ error: { message?: string } | null }>,
+    exec: () => PromiseLike<{ error: { message?: string } | null; status?: number }>,
     offline?: OutboxOp | OutboxOp[],
   ): Promise<"ok" | "queued" | "error"> {
     pendingWrites++;
     try {
       let error: unknown = null;
+      let status: number | undefined;
       try {
-        ({ error } = await exec());
+        const res = await exec();
+        error = res.error;
+        status = res.status;
       } catch (err) {
         error = err; // storage/auth helpers can throw instead of returning
       }
       if (!error) return "ok";
-      if (offline && isNetworkError(error)) {
+      // A transient server status (expired JWT mid-refresh, rate limit, 5xx)
+      // queues like a dead connection: the write is fine, the moment isn't —
+      // rolling back would lose the edit over a hiccup that heals itself.
+      if (offline && (isNetworkError(error) || isTransientStatus(status))) {
         enqueueOutbox(offline);
-        showToast("Offline — saved on this phone, will sync.", "offline");
+        // and make sure something actually replays it soon — a phone that
+        // stays foregrounded online sees no reconnect/visibility trigger
+        scheduleOutboxRetry();
+        showToast(
+          isNetworkError(error)
+            ? "Offline — saved on this phone, will sync."
+            : "Server hiccup — saved on this phone, will sync.",
+          "offline",
+        );
         return "queued";
       }
       showToast("Couldn't save that change.", "error");
@@ -444,6 +473,14 @@ export const useTrip = create<TripState>((set, get) => {
       (r) => r.error,
     );
     if (failed?.error) throw new Error(failed.error.message);
+    // Under an expired session, supabase-js can fall back to the anon key —
+    // and RLS then filters EVERY row, so all eight queries "succeed" empty.
+    // This trip always has a trip row and two profiles; both missing means
+    // the read wasn't authorized, not that the trip vanished. Throw so the
+    // caller keeps local state / the snapshot instead of wiping both.
+    if (((trips.data as Trip[]) ?? []).length === 0 && ((profiles.data as Profile[]) ?? []).length === 0) {
+      throw new Error("Unauthorized read — session not refreshed yet");
+    }
     return {
       profiles: (profiles.data as Profile[]) ?? [],
       trip: ((trips.data as Trip[]) ?? [])[0] ?? null,
@@ -461,11 +498,27 @@ export const useTrip = create<TripState>((set, get) => {
    * Re-pull everything and reconcile — after a Realtime drop or a return to
    * the foreground, local state may have silently missed events.
    */
-  async function refetchAll() {
+  async function refetchAll(opts?: { force?: boolean }) {
     // let in-flight optimistic writes settle, then replay anything queued
     // while offline BEFORE reading, so the read reflects our own edits
     await waitForWrites();
-    if (outboxSize() > 0) await flushOutbox(supabase());
+    if (outboxSize() > 0) {
+      const { remaining } = await flushOutbox(supabase());
+      // Ops still queued (connection flapped again, token not yet refreshed,
+      // or a concurrent flush owns the queue): skip the re-pull. A wholesale
+      // set() now would show server rows that don't yet contain the queued
+      // edits — stops vanishing off the screen until the replay lands.
+      // `force` (deleteDay's failure recovery — re-pull truth is the whole
+      // rollback) proceeds anyway. A skip must not silently spend the
+      // trigger that called us: re-mark the channel down so the next
+      // SUBSCRIBED reconciles, and arm a retry for always-foreground phones
+      // that will never see another external trigger.
+      if (remaining > 0 && !opts?.force) {
+        channelWasDown = true;
+        scheduleOutboxRetry();
+        return;
+      }
+    }
     try {
       const rows = await fetchAllRows();
       lastRefetchAt = Date.now();
@@ -681,6 +734,10 @@ export const useTrip = create<TripState>((set, get) => {
         clearTimeout(routeTimer);
         routeTimer = null;
       }
+      if (outboxRetryTimer) {
+        clearTimeout(outboxRetryTimer);
+        outboxRetryTimer = null;
+      }
       // drop all entity state so nothing from this session flashes for the
       // next sign-in
       set({
@@ -859,7 +916,7 @@ export const useTrip = create<TripState>((set, get) => {
       // gaps a previous delete left behind.
       const gap = prevVias
         .filter((v) => v.after_stop_id === afterStopId)
-        .sort((a, b) => a.seq - b.seq);
+        .sort(bySeq);
       const at = Math.max(0, Math.min(seq, gap.length));
       const shifted = new Map<string, number>();
       gap.forEach((v, i) => {
@@ -1046,7 +1103,9 @@ export const useTrip = create<TripState>((set, get) => {
         );
         failed = results.includes("error");
       }
-      if (failed) await refetchAll();
+      // force: this re-pull IS the rollback — without it a transient flush
+      // failure would leave a phantom multi-row deletion on this phone only
+      if (failed) await refetchAll({ force: true });
     },
 
     updateTrip: async (patch) => {
@@ -1296,6 +1355,10 @@ if (typeof window !== "undefined") {
     if (!s.loaded) return;
     if (snapTimer) clearTimeout(snapTimer);
     snapTimer = setTimeout(() => {
+      // re-check at fire time: a teardown (sign-out) inside the debounce
+      // window must not persist the emptied state as the "last good load" —
+      // that snapshot would later render a blank trip in a dead zone
+      if (!useTrip.getState().loaded) return;
       const { profiles, trip, days, stops, viaPoints, packing, gameEvents, analyses, routes } =
         useTrip.getState();
       const snap: Snapshot = {

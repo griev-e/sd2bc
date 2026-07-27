@@ -57,6 +57,15 @@ describe("pinMatches", () => {
   it("rejects an empty guess against a real PIN", () => {
     expect(pinMatches("", "1234")).toBe(false);
   });
+
+  it("rejects — never throws on — a multi-byte guess of matching length", () => {
+    // "é" is one UTF-16 unit but two UTF-8 bytes: the old pad-and-compare fed
+    // timingSafeEqual unequal byte lengths, which THROWS (an uncaught 500
+    // that also skipped the pin_attempts ledger). "👀👀" is two surrogate
+    // pairs — length 4, matching the PIN's length guard.
+    expect(pinMatches("12é4", "1234")).toBe(false);
+    expect(pinMatches("👀👀", "1234")).toBe(false);
+  });
 });
 
 describe("POST /api/pin-login", () => {
