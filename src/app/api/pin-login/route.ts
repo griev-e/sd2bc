@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { SUPABASE_URL } from "@/lib/config";
+import { boundedFetch } from "@/lib/server/auth";
 
 /**
  * Shared-PIN sign-in. The login screen picks a traveler and sends the PIN;
@@ -31,9 +32,12 @@ const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const PRUNE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 export function pinMatches(given: string, expected: string): boolean {
-  // constant-time compare over equal-length buffers
-  const a = Buffer.from(given.padEnd(64, "\0").slice(0, 64));
-  const b = Buffer.from(expected.padEnd(64, "\0").slice(0, 64));
+  // Constant-time compare over fixed-length digests. Hashing first (not
+  // pad-and-compare) matters: timingSafeEqual THROWS on unequal byte lengths,
+  // and a multi-byte character makes a UTF-16-padded string encode to more
+  // than 64 UTF-8 bytes — an uncaught 500 on a crafted guess.
+  const a = createHash("sha256").update(given).digest();
+  const b = createHash("sha256").update(expected).digest();
   return given.length === expected.length && timingSafeEqual(a, b);
 }
 
@@ -60,6 +64,7 @@ export async function POST(req: NextRequest) {
 
   const admin = createClient(SUPABASE_URL, secret, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: boundedFetch },
   });
 
   // Refuse outright while the failure budget is spent. Fails OPEN on a DB

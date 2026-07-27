@@ -121,7 +121,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 
-  const client = new Anthropic({ apiKey });
+  // Timeout under maxDuration: a stalled call must surface as the typed
+  // APIConnectionTimeoutError → the 502 below, not a platform kill at 60s.
+  const client = new Anthropic({ apiKey, timeout: 50_000 });
   try {
     const response = await client.messages.create({
       model: MODEL,
