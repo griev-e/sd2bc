@@ -12,6 +12,7 @@ import {
   PLATE_RANKING_KEY,
   plateScores,
   rankedCodes,
+  rankingKeyFor,
   removeCode,
   type PlateRanking,
 } from "./plateRank";
@@ -77,6 +78,22 @@ describe("parseRanking", () => {
       doc({ loved: ["CA"] }, "u1", "2026-07-27T00:01:00Z", { key: "other" }),
     ];
     expect(parseRanking(events, "u1")).toEqual(EMPTY_RANKING);
+  });
+
+  it("reads owner-keyed documents written by the other traveler (proxy rating)", () => {
+    // u1's phone entered u2's take: created_by u1, owner in the key
+    const events = [doc({ loved: ["CA"] }, "u1", "2026-07-27T00:00:00Z", { key: rankingKeyFor("u2") })];
+    expect(parseRanking(events, "u2").loved).toEqual(["CA"]);
+    expect(parseRanking(events, "u1")).toEqual(EMPTY_RANKING);
+  });
+
+  it("lets a newer owner-keyed document supersede a legacy one, and vice versa", () => {
+    const legacyThenProxy = [
+      doc({ loved: ["CA"] }, "u2", "2026-07-27T00:00:00Z"), // legacy: bare key, owner = author
+      doc({ loved: ["OR"] }, "u1", "2026-07-27T00:01:00Z", { key: rankingKeyFor("u2") }),
+    ];
+    expect(parseRanking(legacyThenProxy, "u2").loved).toEqual(["OR"]);
+    expect(parseRanking([...legacyThenProxy].reverse(), "u2").loved).toEqual(["CA"]);
   });
 });
 

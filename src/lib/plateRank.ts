@@ -15,11 +15,15 @@ import type { GameEvent } from "./types";
   is the truth.
 
   Persistence: the whole ranking is one JSON document — the latest
-  `game_events` row with kind "score" and key PLATE_RANKING_KEY *per
-  author*. Re-ranks append a fresh document and delete the author's older
-  ones (the writer owns cleanup), so last-write-wins per person and the two
-  travelers' documents never conflict. The claim unique index only covers
-  kind "claim", so both phones can hold a ranking row at once.
+  `game_events` row with kind "score" and key `ranking:<ownerId>`. The
+  owner lives in the *key*, not `created_by`, because either traveler can
+  enter the other's take (the passenger taps while the driver dictates).
+  Re-ranks append a fresh document and delete the owner's older ones (the
+  writer owns cleanup), so last-write-wins per owner. Rows written before
+  proxy rating existed used the bare key "ranking" with the owner implied
+  by `created_by`; parseRanking still reads those, chronological last wins
+  across both forms. The claim unique index only covers kind "claim", so
+  any number of ranking rows can coexist.
 
   Documents deliberately keep codes whose claim was released — the claim
   filter happens at read time (`filterRanking`), so an accidental
@@ -27,6 +31,21 @@ import type { GameEvent } from "./types";
 */
 
 export const PLATE_RANKING_KEY = "ranking";
+
+/** Event key for one person's ranking document (owner in the key). */
+export function rankingKeyFor(userId: string): string {
+  return `${PLATE_RANKING_KEY}:${userId}`;
+}
+
+/** Does this event carry `userId`'s ranking document (either key form)? */
+export function isRankingDocFor(e: GameEvent, userId: string): boolean {
+  return (
+    e.game === "plates" &&
+    e.kind === "score" &&
+    (e.key === rankingKeyFor(userId) ||
+      (e.key === PLATE_RANKING_KEY && e.created_by === userId))
+  );
+}
 
 export type PlateSentiment = "loved" | "fine" | "nope";
 
@@ -134,15 +153,13 @@ export function normalizeRanking(doc: unknown): PlateRanking {
 /**
  * One person's current ranking from the shared event stream. Events arrive
  * oldest-first, so the last matching document wins (last-write-wins, same
- * policy as everything else).
+ * policy as everything else) — regardless of who wrote it or key form.
  */
 export function parseRanking(events: GameEvent[], userId: string | null): PlateRanking {
   if (!userId) return EMPTY_RANKING;
   let doc: unknown = null;
   for (const e of events) {
-    if (e.game === "plates" && e.kind === "score" && e.key === PLATE_RANKING_KEY && e.created_by === userId) {
-      doc = e.value;
-    }
+    if (isRankingDocFor(e, userId)) doc = e.value;
   }
   return doc === null ? EMPTY_RANKING : normalizeRanking(doc);
 }
