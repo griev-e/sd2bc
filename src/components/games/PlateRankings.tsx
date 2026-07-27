@@ -15,16 +15,17 @@ import {
   type PlateScore,
 } from "@/lib/plateRank";
 import type { Profile } from "@/lib/types";
-import { PlateFace, plateInfo } from "./PlateRater";
+import { PlateFace, plateInfo, type RateTask } from "./PlateRater";
 import { useGameEvents, usePlayers } from "./shared";
 
 /**
  * The shared plate leaderboard: every claimed plate ranked by the average of
  * our two personal Beli scores, with each traveler's own number alongside.
  * Scores are positional, so this list quietly reshuffles as duels happen on
- * either phone.
+ * either phone. Every cell is tappable — including the other traveler's,
+ * since whoever isn't driving enters both takes.
  */
-export default function PlateRankings({ onRate }: { onRate: (codes: string[]) => void }) {
+export default function PlateRankings({ onRate }: { onRate: (tasks: RateTask[]) => void }) {
   const events = useGameEvents("plates");
   const { me, partner } = usePlayers();
 
@@ -46,6 +47,13 @@ export default function PlateRankings({ onRate }: { onRate: (codes: string[]) =>
   const rated = board.filter((row) => row.avg !== null);
   const unrated = board.filter((row) => row.avg === null);
   const favorite = rated[0];
+
+  // every missing (plate, person) pair on the board, plate-grouped
+  const allMissing: RateTask[] = board.flatMap((row) =>
+    [me, partner].flatMap((p, i) =>
+      p && row.scores[i] === null ? [{ code: row.code, raterId: p.id }] : [],
+    ),
+  );
 
   if (claimedCodes.length === 0) {
     return (
@@ -99,10 +107,10 @@ export default function PlateRankings({ onRate }: { onRate: (codes: string[]) =>
           <div className="mb-2 flex items-center justify-between px-1">
             <p className="eyebrow">not scored yet</p>
             <button
-              onClick={() => onRate(unrated.map((r) => r.code))}
+              onClick={() => onRate(allMissing)}
               className="text-[11px] font-semibold text-accent"
             >
-              Rate all {unrated.length}
+              Rate all
             </button>
           </div>
           <div className="space-y-0.5">
@@ -155,7 +163,7 @@ function BoardLine({
   rank: number | null;
   me: Profile | null;
   partner: Profile | null;
-  onRate: (codes: string[]) => void;
+  onRate: (tasks: RateTask[]) => void;
 }) {
   const [mine, theirs] = row.scores;
   const { name } = plateInfo(row.code);
@@ -185,52 +193,57 @@ function BoardLine({
           </p>
         )}
       </div>
-      <ScoreCell profile={me} score={mine} onRate={() => onRate([row.code])} />
-      <ScoreCell profile={partner} score={theirs} />
+      <ScoreCell profile={me} score={mine} code={row.code} onRate={onRate} />
+      <ScoreCell profile={partner} score={theirs} code={row.code} onRate={onRate} />
     </div>
   );
 }
 
 /**
- * One person's number for one plate. My cell is tappable: rated re-opens the
- * rater to re-duel it, unrated starts fresh. The partner's cell is display
- * only — their score comes from their own phone.
+ * One person's number for one plate. Every cell is tappable — rated re-opens
+ * the rater to re-duel it, unrated starts fresh — for *either* traveler,
+ * because the passenger enters the driver's take. A missing profile (partner
+ * not loaded) renders an inert dash.
  */
 function ScoreCell({
   profile,
   score,
+  code,
   onRate,
 }: {
   profile: Profile | null;
   score: PlateScore | null;
-  onRate?: () => void;
+  code: string;
+  onRate: (tasks: RateTask[]) => void;
 }) {
-  if (score) {
-    const pill = (
-      <span
-        className="tnum inline-flex w-12 items-center justify-center rounded-full py-1 text-xs font-bold"
-        style={{ background: profile?.color, color: "var(--on-strong)" }}
-      >
-        {fmtScore(score.score)}
-      </span>
-    );
-    return onRate ? (
-      <button onClick={onRate} aria-label={`Re-rate ${score.code}`} className="pressable flex-shrink-0">
-        {pill}
-      </button>
-    ) : (
-      <span className="flex-shrink-0">{pill}</span>
-    );
+  if (!profile) {
+    return <span className="w-12 flex-shrink-0 text-center text-xs text-fg-faint">—</span>;
   }
-  if (onRate) {
+  const rate = () => onRate([{ code, raterId: profile.id }]);
+  if (score) {
     return (
       <button
-        onClick={onRate}
-        className="pressable w-12 flex-shrink-0 rounded-full border border-accent py-1 text-center text-[11px] font-semibold text-accent"
+        onClick={rate}
+        aria-label={`Re-rate ${code} for ${displayName(profile)}`}
+        className="pressable flex-shrink-0"
       >
-        Rate
+        <span
+          className="tnum inline-flex w-12 items-center justify-center rounded-full py-1 text-xs font-bold"
+          style={{ background: profile.color, color: "var(--on-strong)" }}
+        >
+          {fmtScore(score.score)}
+        </span>
       </button>
     );
   }
-  return <span className="w-12 flex-shrink-0 text-center text-xs text-fg-faint">—</span>;
+  return (
+    <button
+      onClick={rate}
+      aria-label={`Rate ${code} for ${displayName(profile)}`}
+      className="pressable w-12 flex-shrink-0 rounded-full py-1 text-center text-[11px] font-semibold"
+      style={{ border: `1px solid ${profile.color}`, color: profile.color }}
+    >
+      Rate
+    </button>
+  );
 }

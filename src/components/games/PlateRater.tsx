@@ -9,6 +9,7 @@ import {
 } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import Sheet from "@/components/Sheet";
+import { displayName } from "@/lib/format";
 import { CA_PROVINCES, US_STATES } from "@/lib/gameData";
 import { SPRING, SPRING_VALUE } from "@/lib/motion";
 import {
@@ -16,9 +17,10 @@ import {
   filterRanking,
   fmtScore,
   insertNear,
-  PLATE_RANKING_KEY,
+  isRankingDocFor,
   parseRanking,
   plateScores,
+  rankingKeyFor,
   sentimentSpec,
   SENTIMENTS,
   type PlateRanking,
@@ -26,6 +28,16 @@ import {
   type PlateSentiment,
 } from "@/lib/plateRank";
 import { useTrip } from "@/lib/store";
+
+/**
+ * One rating to collect: a plate, judged by one traveler. Either phone can
+ * work through either person's tasks — the passenger taps while the driver
+ * dictates — because the ranking document's owner lives in the event key.
+ */
+export interface RateTask {
+  code: string;
+  raterId: string;
+}
 
 /* ── plate identity ─────────────────────────────────────────────────── */
 
@@ -93,7 +105,7 @@ type Step = "sentiment" | "duel" | "reveal";
 interface RaterState {
   step: Step;
   sentiment: PlateSentiment | null;
-  /** My claim-filtered ranking *without* the plate being rated — the duel pool. */
+  /** The rater's claim-filtered ranking *without* the plate being rated — the duel pool. */
   base: PlateRanking;
   /** Binary-search window [lo, hi) into the visible bucket. */
   lo: number;
@@ -103,18 +115,19 @@ interface RaterState {
   result: PlateScore | null;
 }
 
-// Snapshot my ranking when a plate's rating starts, so an in-flight duel
-// sequence never shifts under a Realtime update. Only I edit my document,
-// so the snapshot can't go stale in a way that matters.
-function freshState(forCode: string): RaterState {
+// Snapshot the rater's ranking when a task starts, so an in-flight duel
+// sequence never shifts under a Realtime update. Two phones editing the
+// same person's document at the same moment is a last-write-wins race we
+// accept — same policy as every other shared row.
+function freshState(task: RateTask): RaterState {
   const s = useTrip.getState();
   const plates = s.gameEvents.filter((e) => e.game === "plates");
   const claimed = new Set(
     plates.filter((e) => e.kind === "claim" && e.key).map((e) => e.key as string),
   );
   const base = filterRanking(
-    parseRanking(plates, s.userId),
-    (c) => claimed.has(c) && c !== forCode,
+    parseRanking(plates, task.raterId),
+    (c) => claimed.has(c) && c !== task.code,
   );
   return {
     step: "sentiment",
@@ -129,11 +142,12 @@ function freshState(forCode: string): RaterState {
 }
 
 /**
- * The Beli-style rater: a bottom sheet that walks a queue of plates through
- * sentiment → head-to-head duels → score reveal. Nothing is written until a
- * plate's duels finish; closing mid-flow abandons only the current plate.
- * The parent remounts this (via `key`) for every rating session, so all
- * state initializes lazily off the first plate in the queue.
+ * The Beli-style rater: a bottom sheet that walks a queue of (plate, person)
+ * tasks through sentiment → head-to-head duels → score reveal. Tasks for the
+ * same plate run back-to-back so one phone can collect both takes. Nothing
+ * is written until a task's duels finish; closing mid-flow abandons only the
+ * current task. The parent remounts this (via `key`) for every rating
+ * session, so all state initializes lazily off the first task in the queue.
  */
 export default function PlateRater({
   open,
@@ -141,8 +155,7 @@ export default function PlateRater({
   onClose,
 }: {
   open: boolean;
-  /** Plate codes to rate, in order. */
-  queue: string[];
+  queue: RateTask[];
   onClose: () => void;
 }) {
   const [idx, setIdx] = useState(0);
@@ -151,7 +164,11 @@ export default function PlateRater({
   );
   const [picked, setPicked] = useState<"challenger" | "rival" | null>(null);
   const pickTimer = useRef<number | null>(null);
-  const code = queue[idx] as string | undefined;
+  const profiles = useTrip((s) => s.profiles);
+  const task = queue[idx] as RateTask | undefined;
+  const code = task?.code;
+  const rater = task ? (profiles.find((p) => p.id === task.raterId) ?? null) : null;
+  const raterName = displayName(rater) ?? "?";
 
   useEffect(
     () => () => {
@@ -162,28 +179,26 @@ export default function PlateRater({
 
   /** Persist the finished placement and move to the reveal. */
   function commit(sent: PlateSentiment, index: number) {
-    if (!code || !r) return;
+    if (!task || !code || !r) return;
     const s = useTrip.getState();
     const plates = s.gameEvents.filter((e) => e.game === "plates");
     const visible = r.base[sent];
     // Anchor on visible neighbors — the stored doc may hold released claims.
     const next = insertNear(
-      parseRanking(plates, s.userId),
+      parseRanking(plates, task.raterId),
       sent,
       code,
       visible[index] ?? null,
       visible[index - 1] ?? null,
     );
-    // Insert the fresh document first, then retire my older ones — a dropped
-    // connection can at worst leave a duplicate (harmless: latest wins),
-    // never lose the ranking. Both queue through the outbox offline.
-    const prior = plates.filter(
-      (e) => e.kind === "score" && e.key === PLATE_RANKING_KEY && e.created_by === s.userId,
-    );
+    // Insert the fresh document first, then retire the owner's older ones —
+    // a dropped connection can at worst leave a duplicate (harmless: latest
+    // wins), never lose the ranking. Both queue through the outbox offline.
+    const prior = plates.filter((e) => isRankingDocFor(e, task.raterId));
     void s.addGameEvent({
       game: "plates",
       kind: "score",
-      key: PLATE_RANKING_KEY,
+      key: rankingKeyFor(task.raterId),
       value: next as unknown as Record<string, unknown>,
     });
     for (const p of prior) void s.deleteGameEvent(p.id);
@@ -245,8 +260,15 @@ export default function PlateRater({
     }
   }
 
-  const remaining = queue.length - idx - 1;
-  const rival = r && r.sentiment && r.step === "duel" ? r.base[r.sentiment][Math.floor((r.lo + r.hi) / 2)] : null;
+  const next = queue[idx + 1] as RateTask | undefined;
+  const nextRaterName = next ? displayName(profiles.find((p) => p.id === next.raterId)) : undefined;
+  const nextLabel = !next
+    ? "Done"
+    : next.code === code && nextRaterName
+      ? `Now ${nextRaterName}'s take`
+      : `Next plate · ${queue.length - idx - 1} to go`;
+  const rival =
+    r && r.sentiment && r.step === "duel" ? r.base[r.sentiment][Math.floor((r.lo + r.hi) / 2)] : null;
   const spec = r?.sentiment ? sentimentSpec(r.sentiment) : null;
 
   return (
@@ -259,12 +281,24 @@ export default function PlateRater({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="pt-2"
+            className="pt-1"
           >
+            {/* whose taste is on trial — always visible so proxy entry never mixes up owners */}
+            <div className="mb-3 flex justify-center">
+              <span
+                className="rounded-full px-3 py-1 text-[11px] font-bold"
+                style={{ background: rater?.color ?? "var(--fg-faint)", color: "var(--on-strong)" }}
+              >
+                {raterName}&rsquo;s take
+              </span>
+            </div>
+
             {r.step === "sentiment" && (
               <div className="space-y-4">
                 <PlateFace code={code} />
-                <p className="text-center text-sm font-semibold">How&rsquo;s this one?</p>
+                <p className="text-center text-sm font-semibold">
+                  {raterName}, how&rsquo;s this one?
+                </p>
                 <div className="space-y-2">
                   {SENTIMENTS.map((s) => (
                     <button
@@ -358,7 +392,7 @@ export default function PlateRater({
                       {spec.emoji} {spec.label}
                     </span>
                     <span className="tnum text-[11px] font-semibold text-fg-muted">
-                      #{r.result.rank} of {r.result.total}
+                      #{r.result.rank} of {r.result.total} for {raterName}
                     </span>
                   </motion.div>
                 </div>
@@ -369,7 +403,7 @@ export default function PlateRater({
                   onClick={advance}
                   className="btn-primary pressable w-full rounded-2xl py-3.5 text-sm font-semibold"
                 >
-                  {remaining > 0 ? `Next plate · ${remaining} to go` : "Done"}
+                  {nextLabel}
                 </motion.button>
               </div>
             )}

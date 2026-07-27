@@ -3,12 +3,13 @@
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { IconSearch } from "@/components/Icons";
+import { displayName } from "@/lib/format";
 import { CA_PROVINCES, US_STATES } from "@/lib/gameData";
 import { SPRING } from "@/lib/motion";
 import { parseRanking, rankedCodes } from "@/lib/plateRank";
 import { useTrip } from "@/lib/store";
 import PlateRankings from "./PlateRankings";
-import PlateRater from "./PlateRater";
+import PlateRater, { type RateTask } from "./PlateRater";
 import { useGameEvents, usePlayers } from "./shared";
 
 /**
@@ -25,7 +26,7 @@ export default function PlatesGame() {
   const deleteGameEvent = useTrip((s) => s.deleteGameEvent);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"spot" | "rank">("spot");
-  const [raterQueue, setRaterQueue] = useState<string[]>([]);
+  const [raterQueue, setRaterQueue] = useState<RateTask[]>([]);
   const [raterOpen, setRaterOpen] = useState(false);
   // bumped per rating session — remounts the rater so its state starts fresh
   const [raterSession, setRaterSession] = useState(0);
@@ -38,19 +39,31 @@ export default function PlatesGame() {
     return m;
   }, [events]);
 
-  // Claimed plates I haven't placed in my ranking yet, in spotting order.
-  // The *unfiltered* document counts as rated — a released-then-reclaimed
-  // plate keeps its old placement instead of nagging for a re-duel.
-  const toRate = useMemo(() => {
-    const mine = rankedCodes(parseRanking(events, me?.id ?? null));
-    return [...claims.keys()].filter((c) => !mine.has(c));
-  }, [events, claims, me?.id]);
+  // Every score still missing, either person's, in spotting order — grouped
+  // by plate so both takes collect back-to-back on whichever phone is in the
+  // passenger's hands. The *unfiltered* document counts as rated — a
+  // released-then-reclaimed plate keeps its old placement instead of
+  // nagging for a re-duel.
+  const pending = useMemo<RateTask[]>(() => {
+    const people = [me, partner].filter((p) => p !== null);
+    const ranked = people.map((p) => rankedCodes(parseRanking(events, p.id)));
+    const out: RateTask[] = [];
+    for (const code of claims.keys()) {
+      people.forEach((p, i) => {
+        if (!ranked[i].has(code)) out.push({ code, raterId: p.id });
+      });
+    }
+    return out;
+  }, [events, claims, me, partner]);
+
+  const minePending = pending.filter((t) => t.raterId === me?.id).length;
+  const theirsPending = pending.length - minePending;
 
   const total = US_STATES.length + CA_PROVINCES.length;
 
-  function openRater(codes: string[]) {
-    if (codes.length === 0) return;
-    setRaterQueue(codes);
+  function openRater(tasks: RateTask[]) {
+    if (tasks.length === 0) return;
+    setRaterQueue(tasks);
     setRaterSession((n) => n + 1);
     setRaterOpen(true);
   }
@@ -59,7 +72,14 @@ export default function PlatesGame() {
     const claim = claims.get(code);
     if (!claim) {
       void addGameEvent({ game: "plates", kind: "claim", key: code });
-      openRater([code]); // fresh spot → straight into the rater
+      // fresh spot → straight into the rater, collecting both takes (skip
+      // anyone who already placed it — a released claim coming back)
+      openRater(
+        [me, partner]
+          .filter((p) => p !== null)
+          .filter((p) => !rankedCodes(parseRanking(events, p.id)).has(code))
+          .map((p) => ({ code, raterId: p.id })),
+      );
     } else {
       void deleteGameEvent(claim.id); // cooperative — either of us can undo
     }
@@ -109,10 +129,11 @@ export default function PlatesGame() {
         ))}
       </div>
 
-      {/* the judging never waits: new spots from either phone queue up here */}
-      {toRate.length > 0 && (
+      {/* the judging never waits: missing scores from either of us queue up
+          here, and whoever isn't driving can enter both takes */}
+      {pending.length > 0 && (
         <button
-          onClick={() => openRater(toRate)}
+          onClick={() => openRater(pending)}
           className="card pressable flex w-full items-center gap-3 p-4 text-left"
         >
           <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-accent-soft text-base">
@@ -120,12 +141,16 @@ export default function PlatesGame() {
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-semibold">
-              {toRate.length === 1
-                ? "1 plate needs your score"
-                : `${toRate.length} plates need your score`}
+              {minePending > 0 && theirsPending > 0
+                ? `${pending.length} scores to catch up on`
+                : minePending > 0
+                  ? `${minePending} ${minePending === 1 ? "plate needs" : "plates need"} your score`
+                  : `${theirsPending} ${theirsPending === 1 ? "plate needs" : "plates need"} ${
+                      displayName(partner) ?? "their"
+                    }'s score`}
             </span>
             <span className="block text-[11px] text-fg-faint">
-              Quick duels, Beli-style — your take, out of 10
+              Beli-style duels — the passenger taps, the driver dictates
             </span>
           </span>
           <span className="btn-primary rounded-full px-3.5 py-1.5 text-xs font-semibold">
