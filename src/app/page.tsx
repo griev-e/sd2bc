@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { storedSessionUserId, supabase } from "@/lib/supabase";
 
 export default function Home() {
   const router = useRouter();
@@ -10,7 +10,9 @@ export default function Home() {
     supabase()
       .auth.getSession()
       .then(({ data }) => {
-        router.replace(data.session ? "/map" : "/login");
+        // A stored session with an expired token that can't refresh offline
+        // reads as null here — still ours, so still /map (see supabase.ts).
+        router.replace(data.session || storedSessionUserId() ? "/map" : "/login");
       });
   }, [router]);
 

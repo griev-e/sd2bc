@@ -7,7 +7,7 @@ import BottomNav from "@/components/BottomNav";
 import { localDateISO } from "@/lib/format";
 import { FADE, SPRING } from "@/lib/motion";
 import { getSchedule } from "@/lib/schedule";
-import { supabase } from "@/lib/supabase";
+import { storedSessionUserId, supabase } from "@/lib/supabase";
 import { useTrip } from "@/lib/store";
 import { useWeather } from "@/lib/weather";
 
@@ -58,15 +58,23 @@ export default function TabsLayout({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     const db = supabase();
     db.auth.getSession().then(({ data }) => {
-      if (!data.session) {
+      // getSession() reads null both when signed out and when the stored
+      // session's access token expired in a dead zone (refresh unreachable).
+      // Only the first means login — otherwise a phone opened after an hour
+      // without signal would land here instead of on the offline itinerary.
+      const userId = data.session?.user.id ?? storedSessionUserId();
+      if (!userId) {
         router.replace("/login");
         return;
       }
       setReady(true);
-      void init(data.session.user.id);
+      void init(userId);
     });
-    const { data: sub } = db.auth.onAuthStateChange((_evt, session) => {
-      if (!session) router.replace("/login");
+    const { data: sub } = db.auth.onAuthStateChange((evt) => {
+      // SIGNED_OUT covers every real logout (explicit sign-out, revoked
+      // refresh token) — both clear the stored session first. Transient null
+      // sessions from offline refresh failures never emit it.
+      if (evt === "SIGNED_OUT") router.replace("/login");
     });
     return () => sub.subscription.unsubscribe();
   }, [router, init]);
