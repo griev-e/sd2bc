@@ -11,7 +11,7 @@ import { fmtClock, safeHttpUrl } from "@/lib/format";
 import { geocode, reverseGeocode, type GeocodeResult } from "@/lib/geocode";
 import { DAY_START_MIN, minutesToHHMM, useSchedule } from "@/lib/schedule";
 import { stopsForDay, useTrip } from "@/lib/store";
-import type { Stop, StopKind } from "@/lib/types";
+import { bySeq, type Stop, type StopKind } from "@/lib/types";
 
 /** Preset lengths of stay offered in the editor; null = a pass-through. */
 const STAY_PRESETS: [number | null, string][] = [
@@ -63,7 +63,7 @@ function StopForm({ stopId, onClose }: { stopId: string; onClose: () => void }) 
   // ("leave home at 8"), not an arrival, and it has no stay to plan.
   const isOrigin = useTrip((s) => {
     if (!stop) return false;
-    const firstDay = [...s.days].sort((a, b) => a.seq - b.seq)[0];
+    const firstDay = [...s.days].sort(bySeq)[0];
     if (!firstDay) return false;
     return stopsForDay(s.stops, firstDay.id)[0]?.id === stop.id;
   });

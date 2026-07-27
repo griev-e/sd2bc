@@ -1,6 +1,6 @@
 import { fmtClock } from "./format";
 import type { StopSchedule } from "./schedule";
-import type { Day, Stop, Trip } from "./types";
+import { bySeq, type Day, type Stop, type Trip } from "./types";
 
 /*
   Itinerary → iCalendar, built entirely client-side (no server, no library).
@@ -47,7 +47,7 @@ export function buildItineraryIcs(
   stops: Stop[],
   schedule: Map<string, StopSchedule>,
 ): string {
-  const ordered = [...days].sort((a, b) => a.seq - b.seq);
+  const ordered = [...days].sort(bySeq);
   const stamp = new Date()
     .toISOString()
     .replace(/[-:]/g, "")
@@ -64,7 +64,7 @@ export function buildItineraryIcs(
   for (const day of ordered) {
     const dayStops = stops
       .filter((s) => s.day_id === day.id)
-      .sort((a, b) => a.seq - b.seq);
+      .sort(bySeq);
     const first = dayStops[0]?.name;
     const last = dayStops[dayStops.length - 1]?.name;
     const summary =

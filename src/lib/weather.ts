@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Day, Stop } from "./types";
+import { bySeq, type Day, type Stop } from "./types";
 import { clusterKey, clusterStops } from "./clusters";
 import { localDateISO } from "./format";
 
@@ -132,7 +132,7 @@ export const useWeather = create<WeatherState>((set) => ({
       if (day.date < today || day.date > horizon) continue;
       const dayStops = stops
         .filter((s) => s.day_id === day.id)
-        .sort((a, b) => a.seq - b.seq);
+        .sort(bySeq);
       if (dayStops.length === 0) continue;
 
       const clusters = clusterStops(dayStops);

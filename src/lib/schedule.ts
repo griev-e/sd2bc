@@ -1,7 +1,7 @@
 "use client";
 
 import { useTrip } from "./store";
-import type { Day, DayRoute, Stop } from "./types";
+import { bySeq, type Day, type DayRoute, type Stop } from "./types";
 
 /** Default departure clock for a day when nothing anchors it (9:00 AM). */
 export const DAY_START_MIN = 9 * 60;
@@ -57,7 +57,7 @@ function computeSchedule(
   orderedDays.forEach((day, i) => {
     const dayStops = stops
       .filter((s) => s.day_id === day.id)
-      .sort((a, b) => a.seq - b.seq);
+      .sort(bySeq);
     if (dayStops.length === 0) return;
 
     let dep: number;
@@ -113,7 +113,7 @@ export function getSchedule(
     memoDays = days;
     memoStops = stops;
     memoRoutes = routes;
-    const ordered = [...days].sort((a, b) => a.seq - b.seq);
+    const ordered = [...days].sort(bySeq);
     memoResult = computeSchedule(ordered, stops, routes);
   }
   return memoResult;

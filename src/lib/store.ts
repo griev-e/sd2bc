@@ -14,19 +14,20 @@ import {
   type OutboxOp,
 } from "./outbox";
 import type { LngLat } from "./geo";
-import type {
-  ActivityEntry,
-  AnalysisInsight,
-  Day,
-  DayRoute,
-  GameEvent,
-  PackingItem,
-  Profile,
-  RouteSegment,
-  Stop,
-  Trip,
-  TripAnalysis,
-  ViaPoint,
+import {
+  bySeq,
+  type ActivityEntry,
+  type AnalysisInsight,
+  type Day,
+  type DayRoute,
+  type GameEvent,
+  type PackingItem,
+  type Profile,
+  type RouteSegment,
+  type Stop,
+  type Trip,
+  type TripAnalysis,
+  type ViaPoint,
 } from "./types";
 
 type Tables =
@@ -139,7 +140,7 @@ let toastSeq = 0;
 
 /** Days in itinerary order (by seq). */
 export function sortDays(days: Day[]): Day[] {
-  return [...days].sort((a, b) => a.seq - b.seq);
+  return [...days].sort(bySeq);
 }
 
 /** Memoized `sortDays` over the live store — the app's most-repeated derive. */
@@ -157,7 +158,7 @@ export function shiftDate(iso: string, n: number): string {
   return localDateISO(d);
 }
 function sortStops(stops: Stop[]): Stop[] {
-  return [...stops].sort((a, b) => a.seq - b.seq);
+  return [...stops].sort(bySeq);
 }
 
 /** Next seq for a new stop in a day: max(existing) + 1, never count + 1 — deletions leave gaps. */
@@ -252,7 +253,7 @@ export function dayRoutePoints(
   }
   const viasFor = (stopId: string): RoutePoint[] =>
     (viasByStop.get(stopId) ?? [])
-      .sort((a, b) => a.seq - b.seq)
+      .sort(bySeq)
       .map((v) => ({ lngLat: [v.lng, v.lat] as LngLat, stopId: null, viaId: v.id }));
 
   const points: RoutePoint[] = [];
@@ -874,7 +875,7 @@ export const useTrip = create<TripState>((set, get) => {
       // gaps a previous delete left behind.
       const gap = prevVias
         .filter((v) => v.after_stop_id === afterStopId)
-        .sort((a, b) => a.seq - b.seq);
+        .sort(bySeq);
       const at = Math.max(0, Math.min(seq, gap.length));
       const shifted = new Map<string, number>();
       gap.forEach((v, i) => {
