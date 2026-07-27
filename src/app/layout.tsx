@@ -55,6 +55,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} antialiased`}
       >
+        {/* warm the tile server connection while the map chunk is still
+            parsing — on cold cell data the DNS+TLS round trip is the slowest
+            part of first tile paint. crossOrigin matters: MapLibre fetches
+            tiles in CORS mode, and only a matching connection is reused. */}
+        <link rel="preconnect" href="https://tiles.openfreemap.org" crossOrigin="anonymous" />
         {/* apply the saved theme + accent before first paint to avoid a flash */}
         <script
           dangerouslySetInnerHTML={{
