@@ -92,15 +92,23 @@ export async function flushOutbox(
         error = err;
       }
       if (error && isNetworkError(error)) {
-        // still offline — keep this op and everything after it
-        saveOutbox(queue.slice(done));
-        return { flushed: done, remaining: queue.length - done };
+        // Still offline — keep this op and everything after it. Re-read
+        // storage rather than saving from the snapshot: a write that failed
+        // WHILE this flush was running has appended itself behind our
+        // snapshot, and saving `queue.slice(done)` would silently erase it.
+        const rest = loadOutbox().slice(done);
+        saveOutbox(rest);
+        return { flushed: done, remaining: rest.length };
       }
       // success, or a server-side rejection that will never succeed — move on
       done++;
     }
-    saveOutbox([]);
-    return { flushed: done, remaining: 0 };
+    // Same re-read on the happy path: `saveOutbox([])` here would drop any op
+    // enqueued during the replay. Only the `done` ops we actually replayed —
+    // the head of current storage — come off; late arrivals stay queued.
+    const rest = loadOutbox().slice(done);
+    saveOutbox(rest);
+    return { flushed: done, remaining: rest.length };
   } finally {
     flushing = false;
   }

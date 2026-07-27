@@ -103,6 +103,44 @@ describe("outbox", () => {
     expect(loadOutbox()).toEqual(OPS.slice(1));
   });
 
+  it("keeps an op enqueued while the flush is running", async () => {
+    enqueueOutbox(OPS);
+    // a write fails offline mid-flush and parks itself behind our snapshot
+    const late: OutboxOp = {
+      table: "packing_items",
+      op: "update",
+      id: "p1",
+      values: { checked: true },
+    };
+    let n = 0;
+    const result = await flushOutbox(
+      makeDb(() => {
+        if (++n === 2) enqueueOutbox(late);
+        return { error: null };
+      }),
+    );
+    expect(result).toEqual({ flushed: 3, remaining: 1 });
+    expect(loadOutbox()).toEqual([late]);
+  });
+
+  it("keeps both the unflushed tail and mid-flush enqueues on a network failure", async () => {
+    enqueueOutbox(OPS);
+    const late: OutboxOp = { table: "days", op: "update", id: "d1", values: { title: "x" } };
+    let n = 0;
+    const result = await flushOutbox(
+      makeDb(() => {
+        if (++n === 2) {
+          enqueueOutbox(late);
+          return { error: { message: "fetch failed" } };
+        }
+        return { error: null };
+      }),
+    );
+    // op 1 flushed; op 2 (failed), op 3, and the late arrival all survive
+    expect(result).toEqual({ flushed: 1, remaining: 3 });
+    expect(loadOutbox()).toEqual([OPS[1], OPS[2], late]);
+  });
+
   it("drops an op the server actively rejects and carries on", async () => {
     enqueueOutbox(OPS);
     let n = 0;
