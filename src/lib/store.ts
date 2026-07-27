@@ -452,6 +452,14 @@ export const useTrip = create<TripState>((set, get) => {
       (r) => r.error,
     );
     if (failed?.error) throw new Error(failed.error.message);
+    // Under an expired session, supabase-js can fall back to the anon key —
+    // and RLS then filters EVERY row, so all eight queries "succeed" empty.
+    // This trip always has a trip row and two profiles; both missing means
+    // the read wasn't authorized, not that the trip vanished. Throw so the
+    // caller keeps local state / the snapshot instead of wiping both.
+    if (((trips.data as Trip[]) ?? []).length === 0 && ((profiles.data as Profile[]) ?? []).length === 0) {
+      throw new Error("Unauthorized read — session not refreshed yet");
+    }
     return {
       profiles: (profiles.data as Profile[]) ?? [],
       trip: ((trips.data as Trip[]) ?? [])[0] ?? null,
