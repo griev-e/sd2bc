@@ -143,9 +143,9 @@ export default function MorePage() {
         <section className="card p-5">
           <p className="eyebrow mb-1">Map marker</p>
           <p className="mb-3 text-xs leading-5 text-fg-muted">
-            The icon that drives the route when you tap ▶ on the map — it starts
-            from wherever you are and plays out the rest of the loop. Where you
-            actually are is the teal blip. Set per phone.
+            The icon that marks where the schedule says you should be — show or
+            hide it with the clock toggle on the map. Where you actually are is
+            the teal blip. Set per phone.
           </p>
           <div className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 py-1">
             {VEHICLES.map((v) => (
@@ -316,9 +316,10 @@ function LocationCard({ partnerName }: { partnerName?: string }) {
         <div className="min-w-0">
           <p className="eyebrow mb-1">My location</p>
           <p className="text-xs leading-5 text-fg-muted">
-            Puts a live blip on the map for this phone, and lets ▶ start the drive
-            simulation from wherever you are. It stays on this device — not stored, not
-            sent anywhere, not shown to {partnerName ?? "the other phone"}.
+            Puts a live blip on the map for this phone, and lets the plan marker
+            say how far ahead of or behind schedule you are. It stays on this
+            device — not stored, not sent anywhere, not shown to{" "}
+            {partnerName ?? "the other phone"}.
           </p>
         </div>
         <button

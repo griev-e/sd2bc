@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * The map's route simulation — the vehicle emoji that drives the loop.
+ * The map's plan marker — the vehicle emoji that shows where the schedule
+ * says we're *supposed* to be right now.
  *
  * Two halves:
  *  - a device-local pick of which emoji the marker wears (mirrors theme.ts —
@@ -11,10 +12,10 @@
  *    coordinate", and "where would the clock put us".
  *
  * Where we *actually* are is `lib/location.ts` (real GPS, its own blip). This
- * file only powers the simulation: pressing play snaps our live fix onto the
- * timeline with {@link nearestOnJourney} and sweeps from there to the finish,
- * falling back to {@link liveDistance} — the schedule's best guess from the
- * clock — when there's no fix to snap.
+ * file only powers the plan: {@link liveDistance} reads the clock against the
+ * trip schedule to place the marker, and {@link nearestOnJourney} snaps the
+ * live fix onto the same timeline so the map can say how far ahead of or
+ * behind the plan we're running.
  */
 
 import { closestOnSegment, haversineM, type LngLat } from "./geo";
@@ -201,11 +202,11 @@ export interface NearestOnJourney {
 /**
  * Snap a real-world position onto the timeline: the point on the drawn route
  * closest to `p`, expressed as a distance along the whole loop. This is what
- * lets the simulation start from where we actually are instead of from San
- * Diego on day one.
+ * lets the map compare where we actually are against where the schedule says
+ * we should be, in route miles rather than straight-line ones.
  *
  * Every segment is tested (the loop is a few thousand vertices at most, and
- * this runs on a tap, not per frame). A sweep is deliberate: the route doubles
+ * this runs on a slow tick, not per frame). A sweep is deliberate: the route doubles
  * back on itself up the coast and down again, so a local search from the last
  * known position could snap to the wrong pass.
  */
