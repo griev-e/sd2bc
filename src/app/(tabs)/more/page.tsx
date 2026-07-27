@@ -177,12 +177,14 @@ export default function MorePage() {
         <section className="card p-5">
           <p className="eyebrow mb-3">Crew</p>
           <div className="space-y-3">
-            {[me, partner].filter(Boolean).map((p) => (
-              <div key={p!.id} className="flex items-center gap-3">
-                <AttributionDot userId={p!.id} size={30} />
-                <p className="text-sm font-medium">{displayName(p!)}</p>
-              </div>
-            ))}
+            {[me, partner]
+              .filter((p): p is NonNullable<typeof p> => p != null)
+              .map((p) => (
+                <div key={p.id} className="flex items-center gap-3">
+                  <AttributionDot userId={p.id} size={30} />
+                  <p className="text-sm font-medium">{displayName(p)}</p>
+                </div>
+              ))}
             {!partner && (
               <p className="rounded-2xl bg-accent-soft p-3 text-xs leading-5 text-fg-muted">
                 Your co-pilot&apos;s seat is ready — she just needs to sign in on

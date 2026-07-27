@@ -149,8 +149,8 @@ Conventions every mutation follows — **match these when adding one**:
   worker pool capped at 6 to be polite to the public OSRM server.
 
 The **Games tab** (`(tabs)/games`, `components/games/*`) is a lighter-weight
-extra: five backseat mini-games (Plates, I Spy, Chains, $$$ Cars, Word Rush)
-that share one append-only `game_events` table via `addGameEvent` /
+extra: six backseat mini-games (Wordle, Plates, I Spy, Chains, $$$ Cars, Word
+Rush) that share one append-only `game_events` table via `addGameEvent` /
 `deleteGameEvent`, following the same optimistic-write-then-Realtime-reconcile
 pattern as everything else. `GameId`/`GameEventKind` in `types.ts` and static
 content in `gameData.ts` are the source of truth for what each game shows.
