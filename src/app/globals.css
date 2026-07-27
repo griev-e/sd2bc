@@ -296,13 +296,6 @@ body {
   color: var(--fg-muted);
 }
 
-.text-gradient {
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
 /* ---- motion ----------------------------------------------------------- */
 .pressable {
   transition: transform 150ms ease, opacity 150ms ease, box-shadow 150ms ease;

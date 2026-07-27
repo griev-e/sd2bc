@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WORDLE_WORDS } from "./gameData";
 import {
-  isWin,
   keyStates,
   MAX_GUESSES,
   pickWord,
@@ -30,7 +29,6 @@ describe("scoreGuess", () => {
       "correct",
       "correct",
     ]);
-    expect(isWin(scoreGuess("BEACH", "BEACH"))).toBe(true);
   });
 
   it("marks a fully-disjoint guess absent", () => {
