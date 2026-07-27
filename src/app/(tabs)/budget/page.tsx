@@ -222,7 +222,7 @@ export default function BudgetPage() {
             <div className="flex flex-shrink-0 items-center gap-2">
               <button
                 onClick={() => trip && void updateTrip({ mpg: Math.max(10, Number(trip.mpg) - 1) })}
-                className="btn-ghost pressable flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
+                className="btn-ghost pressable hit-target flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
                 aria-label="Lower MPG"
               >
                 −
@@ -235,7 +235,7 @@ export default function BudgetPage() {
               </div>
               <button
                 onClick={() => trip && void updateTrip({ mpg: Math.min(80, Number(trip.mpg) + 1) })}
-                className="btn-ghost pressable flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
+                className="btn-ghost pressable hit-target flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
                 aria-label="Raise MPG"
               >
                 +

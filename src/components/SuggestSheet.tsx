@@ -249,7 +249,7 @@ function Results({
                   });
                   setAdded(new Set(added).add(s.id));
                 }}
-                className={`pressable mt-auto h-9 rounded-xl text-xs font-semibold ${
+                className={`pressable hit-target mt-auto h-9 rounded-xl text-xs font-semibold ${
                   isAdded ? "bg-accent-soft text-accent" : "btn-primary"
                 }`}
               >

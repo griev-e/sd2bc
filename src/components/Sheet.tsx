@@ -148,7 +148,7 @@ export default function Sheet({ open, onClose, title, children, maxHeight = "82d
                 <button
                   onClick={onClose}
                   aria-label="Close"
-                  className="pressable flex h-8 w-8 items-center justify-center rounded-full bg-fg/5 text-fg-muted"
+                  className="pressable hit-target flex h-8 w-8 items-center justify-center rounded-full bg-fg/5 text-fg-muted"
                 >
                   <svg width="14" height="14" viewBox="0 0 14 14">
                     <path

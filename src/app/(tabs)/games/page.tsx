@@ -41,7 +41,7 @@ export default function GamesPage() {
               <button
                 key={g.id}
                 onClick={() => setActive(g.id)}
-                className={`pressable relative flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors duration-200 ${
+                className={`pressable hit-target flex-shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors duration-200 ${
                   active === g.id
                     ? "text-accent-contrast"
                     : "border border-hairline text-fg-muted"
