@@ -120,7 +120,10 @@ export async function suggestAlongRoute(
   inflight.set(key, p);
   try {
     const result = await p;
-    memCache.set(key, result);
+    // same policy as the Supabase cache below: never pin an empty result —
+    // it's usually a transient hiccup, and a session-cached empty would say
+    // "nothing here" for this day+category until the app restarts
+    if (result.length > 0) memCache.set(key, result);
     return result;
   } finally {
     inflight.delete(key);
@@ -135,10 +138,14 @@ async function fetchSuggestions(
   radiusM: number,
 ): Promise<Suggestion[]> {
   const db = supabase();
+  // bounded: a stalled cache read would pin this key in `inflight`, and the
+  // sheet's retry re-attaches to the hung promise — dead until app restart.
+  // An abort resolves { data: null } (a miss) and falls through to QLever.
   const { data: hit } = await db
     .from("poi_cache")
     .select("payload, updated_at")
     .eq("key", key)
+    .abortSignal(AbortSignal.timeout(10_000))
     .maybeSingle();
   // Serve only non-empty cache hits — an empty payload is almost always a
   // stale "Overpass was busy" result, so fall through and re-query instead.
