@@ -137,6 +137,10 @@ let onlineHandler: (() => void) | null = null;
 // can't stomp state an optimistic write is about to confirm.
 let pendingWrites = 0;
 let toastSeq = 0;
+// Single-shot retry armed whenever the outbox couldn't drain — an always-
+// foreground phone gets no visibility/online/resubscribe trigger, so without
+// this a queued write could sit unsynced for hours.
+let outboxRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Days in itinerary order (by seq). */
 export function sortDays(days: Day[]): Day[] {
@@ -286,6 +290,15 @@ export const useTrip = create<TripState>((set, get) => {
     set({ toast: { id: ++toastSeq, text, kind } });
   }
 
+  /** Arm one retry of the flush-then-reconcile path (no-op if already armed). */
+  function scheduleOutboxRetry(delayMs = 20_000) {
+    if (outboxRetryTimer) return;
+    outboxRetryTimer = setTimeout(() => {
+      outboxRetryTimer = null;
+      if (get().loaded) void refetchAll();
+    }, delayMs);
+  }
+
   /**
    * Run one persistence call. Every mutation goes through here so that
    * (a) refetchAll can wait for in-flight writes, and (b) a failure caused by
@@ -314,7 +327,15 @@ export const useTrip = create<TripState>((set, get) => {
       // rolling back would lose the edit over a hiccup that heals itself.
       if (offline && (isNetworkError(error) || isTransientStatus(status))) {
         enqueueOutbox(offline);
-        showToast("Offline — saved on this phone, will sync.", "offline");
+        // and make sure something actually replays it soon — a phone that
+        // stays foregrounded online sees no reconnect/visibility trigger
+        scheduleOutboxRetry();
+        showToast(
+          isNetworkError(error)
+            ? "Offline — saved on this phone, will sync."
+            : "Server hiccup — saved on this phone, will sync.",
+          "offline",
+        );
         return "queued";
       }
       showToast("Couldn't save that change.", "error");
@@ -477,7 +498,7 @@ export const useTrip = create<TripState>((set, get) => {
    * Re-pull everything and reconcile — after a Realtime drop or a return to
    * the foreground, local state may have silently missed events.
    */
-  async function refetchAll() {
+  async function refetchAll(opts?: { force?: boolean }) {
     // let in-flight optimistic writes settle, then replay anything queued
     // while offline BEFORE reading, so the read reflects our own edits
     await waitForWrites();
@@ -486,9 +507,17 @@ export const useTrip = create<TripState>((set, get) => {
       // Ops still queued (connection flapped again, token not yet refreshed,
       // or a concurrent flush owns the queue): skip the re-pull. A wholesale
       // set() now would show server rows that don't yet contain the queued
-      // edits — stops vanishing off the screen until the replay lands. The
-      // next reconnect/foreground retries; the flush owner re-pulls itself.
-      if (remaining > 0) return;
+      // edits — stops vanishing off the screen until the replay lands.
+      // `force` (deleteDay's failure recovery — re-pull truth is the whole
+      // rollback) proceeds anyway. A skip must not silently spend the
+      // trigger that called us: re-mark the channel down so the next
+      // SUBSCRIBED reconciles, and arm a retry for always-foreground phones
+      // that will never see another external trigger.
+      if (remaining > 0 && !opts?.force) {
+        channelWasDown = true;
+        scheduleOutboxRetry();
+        return;
+      }
     }
     try {
       const rows = await fetchAllRows();
@@ -704,6 +733,10 @@ export const useTrip = create<TripState>((set, get) => {
       if (routeTimer) {
         clearTimeout(routeTimer);
         routeTimer = null;
+      }
+      if (outboxRetryTimer) {
+        clearTimeout(outboxRetryTimer);
+        outboxRetryTimer = null;
       }
       // drop all entity state so nothing from this session flashes for the
       // next sign-in
@@ -1070,7 +1103,9 @@ export const useTrip = create<TripState>((set, get) => {
         );
         failed = results.includes("error");
       }
-      if (failed) await refetchAll();
+      // force: this re-pull IS the rollback — without it a transient flush
+      // failure would leave a phantom multi-row deletion on this phone only
+      if (failed) await refetchAll({ force: true });
     },
 
     updateTrip: async (patch) => {

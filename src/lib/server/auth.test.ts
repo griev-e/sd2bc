@@ -46,6 +46,16 @@ describe("verifyTraveler", () => {
     expect(await verifyTraveler(makeReq("Bearer bad"))).toMatchObject({ status: 401 });
   });
 
+  it("answers 503, not 'sign in', when the auth check itself failed transiently", async () => {
+    // a stalled auth fetch aborted by boundedFetch surfaces as a retryable
+    // error — the traveler's session is fine, they must not be told to re-auth
+    getUserResult = {
+      data: { user: null },
+      error: { name: "AuthRetryableFetchError", message: "fetch timed out", status: 0 },
+    };
+    expect(await verifyTraveler(makeReq("Bearer good"))).toMatchObject({ status: 503 });
+  });
+
   it("accepts a traveler and returns their user id", async () => {
     expect(await verifyTraveler(makeReq("Bearer good"))).toEqual({ userId: "user-1" });
   });

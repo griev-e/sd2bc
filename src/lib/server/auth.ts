@@ -41,7 +41,16 @@ export async function verifyTraveler(req: Request): Promise<TravelerAuth> {
   });
 
   const { data, error } = await db.auth.getUser(token);
-  if (error || !data.user) return { error: "Sign in to use this.", status: 401 };
+  if (error) {
+    // A retryable failure (stalled fetch aborted by boundedFetch, auth
+    // service 5xx) is not an invalid session — telling a signed-in traveler
+    // to "sign in" over a blip sends them to needless re-auth. 503 = retry.
+    if (error.name === "AuthRetryableFetchError" || error.status === 0) {
+      return { error: "Couldn't verify your session — try again.", status: 503 };
+    }
+    return { error: "Sign in to use this.", status: 401 };
+  }
+  if (!data.user) return { error: "Sign in to use this.", status: 401 };
 
   const { data: profile, error: profileErr } = await db
     .from("profiles")
