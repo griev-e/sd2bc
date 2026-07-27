@@ -873,28 +873,42 @@ input[type="checkbox"].check-pill:checked {
   z-index: 4;
   pointer-events: none;
 }
-/* soft ping while the trip is "live" (tracking the real clock) */
-.journey-marker.live::after {
+/* live GPS blip — where this phone actually is, as opposed to the simulation */
+.live-blip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 1px 7px rgba(0, 0, 0, 0.4);
+  will-change: transform;
+  z-index: 5; /* above the journey marker — this one is real */
+  pointer-events: none;
+}
+.live-blip::after {
   content: "";
   position: absolute;
-  inset: -4px;
+  inset: -5px;
   border-radius: 50%;
-  border: 2px solid var(--accent);
-  animation: journey-ping 2.4s ease-out infinite;
+  background: var(--accent);
+  animation: blip-pulse 2.2s ease-out infinite;
 }
-@keyframes journey-ping {
+@keyframes blip-pulse {
   0% {
-    transform: scale(0.8);
-    opacity: 0.7;
+    transform: scale(0.6);
+    opacity: 0.4;
   }
   100% {
-    transform: scale(1.6);
+    transform: scale(2.4);
     opacity: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .journey-marker.live::after {
+  .live-blip::after {
     animation: none;
-    opacity: 0;
+    opacity: 0.16;
   }
 }

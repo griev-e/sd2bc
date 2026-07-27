@@ -84,7 +84,9 @@ src/
 | `server/auth.ts` | Server-only `verifyTraveler()` — Bearer-token gate for `/api/analyze` and `/api/overpass`. |
 | `osrm.ts` | `fetchRoute()` with memory → Supabase `route_cache` → network. |
 | `overpass.ts` | POI suggestions along a route corridor (Overpass/QLever, cached). |
-| `geo.ts` | Pure geometry: haversine, point-to-polyline, region-by-latitude, `hashKey`. |
+| `geo.ts` | Pure geometry: haversine, point-to-segment projection, accuracy rings, region-by-latitude, `hashKey`. |
+| `journey.ts` | The map's route simulation: stitches the day routes into one distance timeline, `positionAtDistance()`, `nearestOnJourney()` (snap a GPS fix onto the route), `liveDistance()` (where the clock says we'd be), plus the device-local vehicle-emoji pick. |
+| `location.ts` | Live device location (Zustand): a `watchPosition` wrapper behind an explicit opt-in — silent resume once granted, watch paused while backgrounded, fix kept in memory only. |
 | `costs.ts` | Seed cost model (2026 regional averages) + `seedEstimate()`. |
 | `schedule.ts` | Arrival/departure ETA computation per stop. |
 | `weather.ts` | Open-Meteo forecasts per stop cluster (Zustand store). |

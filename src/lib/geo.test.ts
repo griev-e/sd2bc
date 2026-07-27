@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   bboxOf,
+  circleRing,
+  closestOnSegment,
   distToSegmentM,
   hashKey,
   haversineM,
@@ -42,6 +44,41 @@ describe("distToSegmentM", () => {
   it("handles a zero-length segment as a point distance", () => {
     const d = distToSegmentM([1, 1], [0, 0], [0, 0]);
     expect(d).toBeCloseTo(haversineM([1, 1], [0, 0]), -2);
+  });
+});
+
+describe("closestOnSegment", () => {
+  it("returns the foot of the perpendicular inside the segment", () => {
+    const p = closestOnSegment([0.5, 0.2], [0, 0], [1, 0]);
+    expect(p.t).toBeCloseTo(0.5, 6);
+    expect(p.point[0]).toBeCloseTo(0.5, 6);
+    expect(p.point[1]).toBeCloseTo(0, 6);
+    expect(p.distM).toBeCloseTo(haversineM([0.5, 0.2], [0.5, 0]), -1);
+  });
+
+  it("clamps t to the segment's ends", () => {
+    expect(closestOnSegment([-1, 0], [0, 0], [1, 0]).t).toBe(0);
+    expect(closestOnSegment([2, 0], [0, 0], [1, 0]).t).toBe(1);
+  });
+
+  it("agrees with distToSegmentM", () => {
+    const a: LngLat = [-122.4, 37.8];
+    const b: LngLat = [-121.9, 37.3];
+    const p: LngLat = [-122.1, 37.7];
+    expect(closestOnSegment(p, a, b).distM).toBeCloseTo(distToSegmentM(p, a, b), 6);
+  });
+});
+
+describe("circleRing", () => {
+  it("closes the ring and sits the requested distance out", () => {
+    const center: LngLat = [-122.4, 37.8];
+    const ring = circleRing(center, 500, 16);
+    expect(ring).toHaveLength(17);
+    expect(ring[0]).toEqual(ring[ring.length - 1]);
+    for (const point of ring) {
+      expect(haversineM(center, point)).toBeGreaterThan(480);
+      expect(haversineM(center, point)).toBeLessThan(520);
+    }
   });
 });
 

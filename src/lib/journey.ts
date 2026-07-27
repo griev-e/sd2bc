@@ -1,21 +1,23 @@
 "use client";
 
 /**
- * The moving "where are we right now" marker for the map.
+ * The map's route simulation — the vehicle emoji that drives the loop.
  *
  * Two halves:
  *  - a device-local pick of which emoji the marker wears (mirrors theme.ts —
  *    useSyncExternalStore + localStorage, changed in More → settings), and
  *  - pure geometry that turns the day routes into one continuous timeline and
- *    answers "where along it is the trip at distance D / at clock T".
+ *    answers "where along it is distance D", "what distance is closest to this
+ *    coordinate", and "where would the clock put us".
  *
- * Live mode drives the distance from the real clock through the trip schedule
- * (before the trip it sits at the origin, after it rests at the finish); the
- * map's "drive it" control instead sweeps the distance start→finish to
- * simulate the whole loop. Both feed the same {@link positionAtDistance}.
+ * Where we *actually* are is `lib/location.ts` (real GPS, its own blip). This
+ * file only powers the simulation: pressing play snaps our live fix onto the
+ * timeline with {@link nearestOnJourney} and sweeps from there to the finish,
+ * falling back to {@link liveDistance} — the schedule's best guess from the
+ * clock — when there's no fix to snap.
  */
 
-import { haversineM, type LngLat } from "./geo";
+import { closestOnSegment, haversineM, type LngLat } from "./geo";
 import { localDateISO } from "./format";
 import { DAY_START_MIN, type StopSchedule } from "./schedule";
 import type { Day, DayRoute, Stop } from "./types";
@@ -185,6 +187,48 @@ export function positionAtDistance(journey: Journey, dist: number): JourneyPosit
     dayId: leg?.dayId ?? null,
     progress: totalDist > 0 ? d / totalDist : 0,
   };
+}
+
+export interface NearestOnJourney {
+  /** Distance along the timeline of the closest point to the query. */
+  dist: number;
+  /** How far the query sits off the route, in meters. */
+  offRouteM: number;
+  /** The on-route point itself. */
+  lngLat: LngLat;
+}
+
+/**
+ * Snap a real-world position onto the timeline: the point on the drawn route
+ * closest to `p`, expressed as a distance along the whole loop. This is what
+ * lets the simulation start from where we actually are instead of from San
+ * Diego on day one.
+ *
+ * Every segment is tested (the loop is a few thousand vertices at most, and
+ * this runs on a tap, not per frame). A sweep is deliberate: the route doubles
+ * back on itself up the coast and down again, so a local search from the last
+ * known position could snap to the wrong pass.
+ */
+export function nearestOnJourney(journey: Journey, p: LngLat): NearestOnJourney | null {
+  const { points } = journey;
+  if (points.length === 0) return null;
+  if (points.length === 1) {
+    return { dist: points[0].cumDist, offRouteM: haversineM(p, points[0].lngLat), lngLat: points[0].lngLat };
+  }
+
+  let best: NearestOnJourney | null = null;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const proj = closestOnSegment(p, a.lngLat, b.lngLat);
+    if (best && proj.distM >= best.offRouteM) continue;
+    best = {
+      dist: a.cumDist + (b.cumDist - a.cumDist) * proj.t,
+      offRouteM: proj.distM,
+      lngLat: proj.point,
+    };
+  }
+  return best;
 }
 
 /**
