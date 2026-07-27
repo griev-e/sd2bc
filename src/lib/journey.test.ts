@@ -218,6 +218,104 @@ describe("liveDistance", () => {
   });
 });
 
+// The itinerary-aware path: a day whose route carries stop→stop segments gets
+// per-stop anchors, so the marker drives each leg on its own clock and waits
+// out planned stays instead of sweeping the day's whole distance uniformly.
+describe("liveDistance with per-stop anchors", () => {
+  // One day: A(0°) → B(1°) → C(2°), equal distances.
+  const day1 = makeDay("A", 1, "2026-07-27");
+  const segRoute: DayRoute = {
+    dayId: "A",
+    coordinates: [
+      [0, 0],
+      [1, 0],
+      [2, 0],
+    ],
+    segments: [
+      { fromStopId: "s1", toStopId: "s2", distanceM: 111000, durationS: 7200 },
+      { fromStopId: "s2", toStopId: "s3", distanceM: 111000, durationS: 7200 },
+    ],
+    distanceM: 222000,
+    durationS: 14400,
+  };
+  const j = buildJourney([day1], { A: segRoute });
+  const days = [day1];
+  const stops = [makeStop("s1", "A", 1), makeStop("s2", "A", 2), makeStop("s3", "A", 3)];
+  const sched = (arrivalMin: number, departMin: number): StopSchedule => ({
+    arrivalMin,
+    departMin,
+    anchored: false,
+  });
+  // Depart 9:00, reach B at 11:00, sit there until 14:00, reach C at 16:00.
+  const withStay = new Map<string, StopSchedule>([
+    ["s1", sched(540, 540)],
+    ["s2", sched(660, 840)],
+    ["s3", sched(960, 960)],
+  ]);
+  const at = (h: number, m = 0, s = withStay) =>
+    liveDistance(j, days, stops, s, new Date(2026, 6, 27, h, m)) / j.totalDist;
+
+  it("pins each stop to its share of the day's driving", () => {
+    expect(j.legs[0].anchors.map((a) => a.stopId)).toEqual(["s1", "s2", "s3"]);
+    expect(j.legs[0].anchors[0].dist).toBe(0);
+    expect(j.legs[0].anchors[1].dist).toBeCloseTo(j.totalDist / 2, -1);
+    expect(j.legs[0].anchors[2].dist).toBeCloseTo(j.totalDist, 6);
+  });
+
+  it("sits still for the whole of a planned stay", () => {
+    // arrival at B, and every hour of the three-hour stop, is the same place
+    expect(at(11)).toBeCloseTo(0.5, 2);
+    expect(at(12)).toBeCloseTo(0.5, 2);
+    expect(at(13, 30)).toBeCloseTo(0.5, 2);
+    // and it leaves the moment the stay is over
+    expect(at(15)).toBeCloseTo(0.75, 2);
+  });
+
+  it("drives each segment on that segment's own clock", () => {
+    expect(at(10)).toBeCloseTo(0.25, 2); // halfway to B
+    expect(at(16)).toBeCloseTo(1, 2); // arrived at C
+  });
+
+  it("honors a slow leg followed by a fast one", () => {
+    // same road, but B is reached at 15:00 and C an hour later
+    const lopsided = new Map<string, StopSchedule>([
+      ["s1", sched(540, 540)],
+      ["s2", sched(900, 900)],
+      ["s3", sched(960, 960)],
+    ]);
+    expect(at(12, 0, lopsided)).toBeCloseTo(0.25, 2); // still crawling to B
+    expect(at(15, 30, lopsided)).toBeCloseTo(0.75, 2); // flying to C
+  });
+
+  it("holds at the last stop once the day's driving is done", () => {
+    expect(at(21)).toBeCloseTo(1, 6);
+  });
+
+  it("holds at the origin before the morning departure", () => {
+    expect(at(6)).toBe(0);
+  });
+
+  it("jumps forward when a start_time anchors a stop earlier than the drive", () => {
+    // B is pinned to 9:30 though the drive can't get there until 11:00
+    const anchored = new Map<string, StopSchedule>([
+      ["s1", sched(540, 540)],
+      ["s2", sched(570, 570)],
+      ["s3", sched(960, 960)],
+    ]);
+    expect(at(10, 0, anchored)).toBeGreaterThan(0.5);
+  });
+
+  it("falls back to the day-wide sweep when the route has no segments yet", () => {
+    const bare = buildJourney([day1], {
+      A: { ...segRoute, segments: [] },
+    });
+    expect(bare.legs[0].anchors).toEqual([]);
+    const d = liveDistance(bare, days, stops, withStay, new Date(2026, 6, 27, 12, 30));
+    // 9:00→16:00 swept linearly: 3.5h of 7h
+    expect(d / bare.totalDist).toBeCloseTo(0.5, 2);
+  });
+});
+
 describe("vehicle preference", () => {
   it("defaults to the van when unset", () => {
     expect(getVehiclePref()).toBe("van");
