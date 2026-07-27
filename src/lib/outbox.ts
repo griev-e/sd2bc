@@ -61,14 +61,44 @@ export function outboxSize(): number {
   return loadOutbox().length;
 }
 
+/**
+ * An HTTP status that means "try again later", never "this write is invalid":
+ * fetch-level failure (0 — what postgrest-js reports when the request never
+ * reached a server), auth not yet refreshed (401 expired JWT, 403 from the
+ * anon-key fallback supabase-js uses when it can't produce a session — under
+ * RLS that reads as a policy violation even though the write is fine), 408
+ * timeout, 429 rate limit, and any 5xx. Genuine rejections (400/404/409/422 —
+ * e.g. a game claim that lost the unique-index race) are NOT transient.
+ */
+export function isTransientStatus(status: number | undefined): boolean {
+  if (typeof status !== "number") return false;
+  return (
+    status === 0 ||
+    status === 401 ||
+    status === 403 ||
+    status === 408 ||
+    status === 429 ||
+    status >= 500
+  );
+}
+
 let flushing = false;
 
 /**
- * Replay queued ops in FIFO order. Stops (keeping the rest) on the first
- * network failure; DROPS an op the server actively rejects (RLS, constraint —
+ * Replay queued ops in FIFO order. Stops (keeping this op and the rest) on a
+ * network failure or a transient server error — an expired JWT right after a
+ * dead zone, a rate limit, a 5xx — since those succeed on a later retry.
+ * DROPS only an op the server definitively rejects (constraint, bad request —
  * e.g. a game claim that lost the race while we were offline) since it can
  * never succeed. Inserts replay as upserts so a half-flushed queue is safe to
  * run again.
+ *
+ * Storage is consumed one op at a time as each lands, never saved from a
+ * snapshot at the end: (a) an op enqueued by a write failing DURING this
+ * flush's awaits appends behind the head and must survive the flush, and
+ * (b) an app killed mid-flush must replay at most the one in-flight op on
+ * next launch — not re-apply the whole queue's stale values hours later over
+ * the other phone's newer edits.
  */
 export async function flushOutbox(
   db: SupabaseClient,
@@ -80,35 +110,33 @@ export async function flushOutbox(
     let done = 0;
     for (const op of queue) {
       let error: unknown = null;
+      let status: number | undefined;
       try {
+        let res: { error: unknown; status?: number };
         if (op.op === "insert") {
-          ({ error } = await db.from(op.table).upsert(op.values));
+          res = await db.from(op.table).upsert(op.values);
         } else if (op.op === "update") {
-          ({ error } = await db.from(op.table).update(op.values).eq("id", op.id));
+          res = await db.from(op.table).update(op.values).eq("id", op.id);
         } else {
-          ({ error } = await db.from(op.table).delete().eq("id", op.id));
+          res = await db.from(op.table).delete().eq("id", op.id);
         }
+        error = res.error;
+        status = res.status;
       } catch (err) {
         error = err;
       }
-      if (error && isNetworkError(error)) {
-        // Still offline — keep this op and everything after it. Re-read
-        // storage rather than saving from the snapshot: a write that failed
-        // WHILE this flush was running has appended itself behind our
-        // snapshot, and saving `queue.slice(done)` would silently erase it.
-        const rest = loadOutbox().slice(done);
-        saveOutbox(rest);
-        return { flushed: done, remaining: rest.length };
+      if (error && (isNetworkError(error) || isTransientStatus(status))) {
+        // Unreachable, mid-refresh, or having a moment — keep everything
+        // from this op on. Storage already holds exactly the unflushed
+        // remainder (heads were consumed as they landed) plus any mid-flush
+        // enqueues, so there is nothing to save here.
+        return { flushed: done, remaining: outboxSize() };
       }
-      // success, or a server-side rejection that will never succeed — move on
+      // Success, or a rejection that can never succeed: consume the head.
+      saveOutbox(loadOutbox().slice(1));
       done++;
     }
-    // Same re-read on the happy path: `saveOutbox([])` here would drop any op
-    // enqueued during the replay. Only the `done` ops we actually replayed —
-    // the head of current storage — come off; late arrivals stay queued.
-    const rest = loadOutbox().slice(done);
-    saveOutbox(rest);
-    return { flushed: done, remaining: rest.length };
+    return { flushed: done, remaining: outboxSize() };
   } finally {
     flushing = false;
   }
