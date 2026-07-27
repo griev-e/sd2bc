@@ -9,6 +9,7 @@ import {
   enqueueOutbox,
   flushOutbox,
   isNetworkError,
+  isTransientStatus,
   outboxSize,
   type OutboxOp,
 } from "./outbox";
@@ -292,19 +293,25 @@ export const useTrip = create<TripState>((set, get) => {
    * roll back ONLY on "error".
    */
   async function runWrite(
-    exec: () => PromiseLike<{ error: { message?: string } | null }>,
+    exec: () => PromiseLike<{ error: { message?: string } | null; status?: number }>,
     offline?: OutboxOp | OutboxOp[],
   ): Promise<"ok" | "queued" | "error"> {
     pendingWrites++;
     try {
       let error: unknown = null;
+      let status: number | undefined;
       try {
-        ({ error } = await exec());
+        const res = await exec();
+        error = res.error;
+        status = res.status;
       } catch (err) {
         error = err; // storage/auth helpers can throw instead of returning
       }
       if (!error) return "ok";
-      if (offline && isNetworkError(error)) {
+      // A transient server status (expired JWT mid-refresh, rate limit, 5xx)
+      // queues like a dead connection: the write is fine, the moment isn't —
+      // rolling back would lose the edit over a hiccup that heals itself.
+      if (offline && (isNetworkError(error) || isTransientStatus(status))) {
         enqueueOutbox(offline);
         showToast("Offline — saved on this phone, will sync.", "offline");
         return "queued";
@@ -465,7 +472,15 @@ export const useTrip = create<TripState>((set, get) => {
     // let in-flight optimistic writes settle, then replay anything queued
     // while offline BEFORE reading, so the read reflects our own edits
     await waitForWrites();
-    if (outboxSize() > 0) await flushOutbox(supabase());
+    if (outboxSize() > 0) {
+      const { remaining } = await flushOutbox(supabase());
+      // Ops still queued (connection flapped again, token not yet refreshed,
+      // or a concurrent flush owns the queue): skip the re-pull. A wholesale
+      // set() now would show server rows that don't yet contain the queued
+      // edits — stops vanishing off the screen until the replay lands. The
+      // next reconnect/foreground retries; the flush owner re-pulls itself.
+      if (remaining > 0) return;
+    }
     try {
       const rows = await fetchAllRows();
       lastRefetchAt = Date.now();
