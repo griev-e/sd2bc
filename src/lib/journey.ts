@@ -21,7 +21,7 @@
 import { closestOnSegment, haversineM, type LngLat } from "./geo";
 import { localDateISO } from "./format";
 import { DAY_START_MIN, type StopSchedule } from "./schedule";
-import { bySeq, type Day, type DayRoute, type Stop } from "./types";
+import { bySeq, type Day, type DayRoute, type RouteSegment, type Stop } from "./types";
 
 /* ---- vehicle preference (device-local, like theme) --------------------- */
 
@@ -84,6 +84,13 @@ interface JourneyPoint {
   cumDist: number;
 }
 
+/** A stop the day's route passes, pinned to its distance along the timeline. */
+export interface JourneyAnchor {
+  stopId: string;
+  /** Meters from the trip's start. */
+  dist: number;
+}
+
 /** One day's slice of the timeline, by distance. */
 export interface JourneyLeg {
   dayId: string;
@@ -91,12 +98,50 @@ export interface JourneyLeg {
   index: number;
   startDist: number;
   endDist: number;
+  /**
+   * Every stop on this leg in drive order, by distance — `anchors[0]` is where
+   * the leg begins (the previous night's stay for days after the first), then
+   * one per stop the day drives to. This is what lets {@link liveDistance} walk
+   * the day stop by stop instead of assuming one constant-speed slog: without
+   * it a planned two-hour lunch has the marker gliding right through town.
+   * Empty when the day's route has no segments yet.
+   */
+  anchors: JourneyAnchor[];
 }
 
 export interface Journey {
   points: JourneyPoint[];
   legs: JourneyLeg[];
   totalDist: number;
+}
+
+/**
+ * Place each stop on the leg's distance range.
+ *
+ * The segments carry OSRM's road distances while the leg is measured by
+ * haversine over the drawn polyline — the same road, rounded differently. So
+ * stops are placed by their *share* of the day's driving and scaled onto the
+ * leg, which keeps the last anchor exactly on the leg's end no matter how the
+ * two totals disagree.
+ */
+function legAnchors(
+  segments: RouteSegment[],
+  startDist: number,
+  endDist: number,
+): JourneyAnchor[] {
+  if (segments.length === 0) return [];
+  const total = segments.reduce((sum, seg) => sum + seg.distanceM, 0);
+  const span = endDist - startDist;
+  const anchors: JourneyAnchor[] = [{ stopId: segments[0].fromStopId, dist: startDist }];
+  let run = 0;
+  for (const seg of segments) {
+    run += seg.distanceM;
+    anchors.push({
+      stopId: seg.toStopId,
+      dist: total > 0 ? startDist + (run / total) * span : endDist,
+    });
+  }
+  return anchors;
 }
 
 /**
@@ -115,9 +160,10 @@ export function buildJourney(
   let cum = 0;
 
   orderedDays.forEach((day, index) => {
-    const coords = (routes[day.id]?.coordinates ?? []) as LngLat[];
+    const route = routes[day.id];
+    const coords = (route?.coordinates ?? []) as LngLat[];
     if (coords.length < 2) {
-      legs.push({ dayId: day.id, index, startDist: cum, endDist: cum });
+      legs.push({ dayId: day.id, index, startDist: cum, endDist: cum, anchors: [] });
       return;
     }
     const startDist = cum;
@@ -125,7 +171,13 @@ export function buildJourney(
       if (i > 0) cum += haversineM(coords[i - 1], coords[i]);
       points.push({ lngLat: coords[i], cumDist: cum });
     }
-    legs.push({ dayId: day.id, index, startDist, endDist: cum });
+    legs.push({
+      dayId: day.id,
+      index,
+      startDist,
+      endDist: cum,
+      anchors: legAnchors(route?.segments ?? [], startDist, cum),
+    });
   });
 
   return { points, legs, totalDist: cum };
@@ -235,10 +287,17 @@ export function nearestOnJourney(journey: Journey, p: LngLat): NearestOnJourney 
 /**
  * Distance along the timeline for the real clock, honoring the trip schedule:
  * before departure day → 0 (parked at the origin); after the final day → the
- * finish. On a travel day the marker eases from the day's morning departure to
- * its last arrival across that day's leg, and rests at either end outside those
- * hours. Mirrors schedule.ts: day one leaves from the origin's own departure,
- * later days from the 9:00 default.
+ * finish. On a travel day the marker follows the day's stops in order — driving
+ * between them on each segment's own clock and *sitting still* for the length
+ * of each planned stay — and rests at either end outside those hours. Mirrors
+ * schedule.ts: day one leaves from the origin's own departure, later days from
+ * the 9:00 default.
+ *
+ * Walking the stops (rather than sweeping the day's whole distance between the
+ * morning departure and the last arrival) is what keeps the marker honest as
+ * the itinerary is edited: a long lunch, a 3pm check-in time, or a slow city
+ * leg followed by a fast freeway one all move the marker differently, and a
+ * single straight-line sweep gets every one of them wrong.
  */
 export function liveDistance(
   journey: Journey,
@@ -278,10 +337,35 @@ export function liveDistance(
   // day one departs from the origin's own clock; later days from 9:00
   const depart =
     dayIdx === 0 && first ? schedule.get(first.id)?.departMin ?? DAY_START_MIN : DAY_START_MIN;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  // Preferred path: hop stop to stop on the schedule's own times.
+  if (leg.anchors.length >= 2) {
+    if (nowMin <= depart) return leg.anchors[0].dist;
+    let prevDepart = depart;
+    for (let i = 1; i < leg.anchors.length; i++) {
+      const anchor = leg.anchors[i];
+      const stopSchedule = schedule.get(anchor.stopId);
+      // A start_time can pull a stop earlier than the drive allows; treat a
+      // non-positive window as "already there" rather than dividing by it.
+      const arrivalMin = stopSchedule?.arrivalMin ?? prevDepart;
+      if (nowMin < arrivalMin) {
+        const prev = leg.anchors[i - 1];
+        const window = arrivalMin - prevDepart;
+        const frac = window > 0 ? Math.max(0, Math.min(1, (nowMin - prevDepart) / window)) : 1;
+        return prev.dist + frac * (anchor.dist - prev.dist);
+      }
+      const departMin = stopSchedule?.departMin ?? arrivalMin;
+      if (nowMin < departMin) return anchor.dist; // parked, mid-stay
+      prevDepart = departMin;
+    }
+    return leg.anchors[leg.anchors.length - 1].dist; // day's driving done
+  }
+
+  // Fallback for a day whose route hasn't produced segments yet: sweep the
+  // leg between the morning departure and the last arrival.
   const arrive = last ? schedule.get(last.id)?.arrivalMin ?? depart : depart;
   if (arrive <= depart) return leg.startDist;
-
-  const nowMin = now.getHours() * 60 + now.getMinutes();
   const frac = Math.max(0, Math.min(1, (nowMin - depart) / (arrive - depart)));
   return leg.startDist + frac * (leg.endDist - leg.startDist);
 }
