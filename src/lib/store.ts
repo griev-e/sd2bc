@@ -1312,6 +1312,10 @@ if (typeof window !== "undefined") {
     if (!s.loaded) return;
     if (snapTimer) clearTimeout(snapTimer);
     snapTimer = setTimeout(() => {
+      // re-check at fire time: a teardown (sign-out) inside the debounce
+      // window must not persist the emptied state as the "last good load" —
+      // that snapshot would later render a blank trip in a dead zone
+      if (!useTrip.getState().loaded) return;
       const { profiles, trip, days, stops, viaPoints, packing, gameEvents, analyses, routes } =
         useTrip.getState();
       const snap: Snapshot = {
