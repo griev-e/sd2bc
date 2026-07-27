@@ -14,6 +14,7 @@ import {
   VEHICLES,
   vehicleSubscribe,
 } from "@/lib/journey";
+import { useLocation } from "@/lib/location";
 import { getSchedule } from "@/lib/schedule";
 import { useTrip } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
@@ -135,6 +136,9 @@ export default function MorePage() {
           </p>
         </section>
 
+        {/* live location — the one thing here that needs a browser permission */}
+        <LocationCard partnerName={displayName(partner)} />
+
         {/* map marker — the vehicle that rides the route */}
         <section className="card p-5">
           <p className="eyebrow mb-1">Map marker</p>
@@ -253,6 +257,108 @@ export default function MorePage() {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Live location: the switch that actually asks the browser for permission.
+ *
+ * The map's locate button does the same thing, but it's a 44px crosshair with
+ * no room to explain itself — and when a browser refuses, it refuses silently.
+ * This card is the place that can say what's on, what the browser thinks, and
+ * what to do about it.
+ */
+function LocationCard({ partnerName }: { partnerName?: string }) {
+  const status = useLocation((s) => s.status);
+  const permission = useLocation((s) => s.permission);
+  const fix = useLocation((s) => s.fix);
+  const start = useLocation((s) => s.start);
+  const stop = useLocation((s) => s.stop);
+  const refreshPermission = useLocation((s) => s.refreshPermission);
+
+  // Re-read the permission on open: it can be changed from the browser's site
+  // settings while the app sits in another tab.
+  useEffect(() => {
+    refreshPermission();
+  }, [refreshPermission]);
+
+  const blocked = status === "denied" || permission === "denied";
+  // Blocked reads as off, even though the choice is remembered — a green
+  // switch next to "your browser is blocking it" would just be a lie. Tapping
+  // it re-arms the watch, which is exactly what "Try again" does.
+  const on = !blocked && status !== "idle" && status !== "unavailable";
+
+  const detail = (() => {
+    if (status === "unavailable") return "This browser can't share a location.";
+    if (blocked) {
+      return "Your browser is blocking it. On iPhone: aA in the address bar → Website Settings → Location → Allow. Then switch this back on.";
+    }
+    if (status === "error") return "No fix yet — that usually clears up with a better view of the sky.";
+    if (status === "locating") {
+      return permission === "prompt" || permission === "unknown"
+        ? "Waiting for you to allow location in the browser prompt…"
+        : "Waiting for the first fix…";
+    }
+    if (status === "live" && fix) {
+      // The reading's own clock time, not "4s ago" — a relative age would need
+      // a ticker to stay true, and this is a settings row, not a HUD.
+      const at = new Date(fix.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      return `Accurate to about ${Math.round(fix.accuracyM)} m · last fix ${at}`;
+    }
+    return "Off. Nothing is read from the phone's location until you switch this on.";
+  })();
+
+  return (
+    <section className="card p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="eyebrow mb-1">My location</p>
+          <p className="text-xs leading-5 text-fg-muted">
+            Puts a live blip on the map for this phone, and lets ▶ start the drive
+            simulation from wherever you are. It stays on this device — not stored, not
+            sent anywhere, not shown to {partnerName ?? "the other phone"}.
+          </p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={on}
+          aria-label="Show my location on the map"
+          onClick={() => (on ? stop() : start())}
+          disabled={status === "unavailable"}
+          className="pressable mt-1 flex-shrink-0 rounded-full p-0.5 transition-colors duration-200 disabled:opacity-40"
+          style={{
+            width: 52,
+            height: 30,
+            background: on ? "var(--accent)" : "var(--fg-faint)",
+          }}
+        >
+          <span
+            className="block h-[26px] w-[26px] rounded-full bg-white transition-transform duration-200"
+            style={{ transform: on ? "translateX(22px)" : "translateX(0)" }}
+          />
+        </button>
+      </div>
+
+      <p
+        className={`mt-3 text-[11px] leading-4 ${
+          blocked || status === "error" ? "text-danger" : "text-fg-faint"
+        }`}
+      >
+        {detail}
+      </p>
+
+      {blocked && (
+        <button
+          onClick={() => {
+            refreshPermission();
+            start(); // re-arms the watch the moment the browser is set to Allow
+          }}
+          className="btn-ghost pressable mt-3 h-10 w-full rounded-xl text-xs font-semibold"
+        >
+          Try again
+        </button>
+      )}
+    </section>
   );
 }
 

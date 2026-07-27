@@ -845,26 +845,19 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
     if (centerOnFix()) hasCentered.current = true;
   }, [locStatus, centerOnFix]);
 
-  const toggleLocate = useCallback(() => {
-    const { status, start, stop, fix } = useLocation.getState();
-    const map = mapRef.current;
-    if (status === "idle" || status === "denied" || status === "error") {
-      start();
+  /**
+   * The locate button only ever turns tracking *on* and recenters. Switching
+   * it off lives in More → My location, where it's a labelled switch: a tap on
+   * a 44px crosshair that sometimes means "show me" and sometimes means "stop"
+   * is how you end up thinking the blip is broken.
+   */
+  const handleLocate = useCallback(() => {
+    const { status, start } = useLocation.getState();
+    if (status === "live") {
+      centerOnFix();
       return;
     }
-    // Already tracking. A tap almost always means "put me back in the middle",
-    // so only the second tap in a row — with the blip already sitting dead
-    // center — is read as "that's enough" and switches tracking off.
-    if (fix && map) {
-      const at = map.project(fix.lngLat);
-      const { width, height } = map.getCanvas().getBoundingClientRect();
-      const centered = Math.hypot(at.x - width / 2, at.y - height / 2) < 60;
-      if (!centered) {
-        centerOnFix();
-        return;
-      }
-    }
-    stop();
+    start();
   }, [centerOnFix]);
 
   // ---- camera -------------------------------------------------------------------
@@ -985,13 +978,8 @@ export default function MapView({ onSelectStop, onLongPress }: MapViewProps) {
 
       {/* live location — tap to start tracking, again to recenter or stop */}
       <button
-        onClick={toggleLocate}
-        aria-label={
-          locStatus === "live" || locStatus === "locating"
-            ? "Recenter on my location"
-            : "Show my location"
-        }
-        aria-pressed={locStatus === "live" || locStatus === "locating"}
+        onClick={handleLocate}
+        aria-label={locStatus === "live" ? "Recenter on my location" : "Show my location"}
         className={`glass pressable absolute right-4 top-[calc(env(safe-area-inset-top)+274px)] z-10 flex h-11 w-11 items-center justify-center rounded-2xl ${
           locStatus === "live" ? "text-accent" : "text-fg-muted"
         }`}

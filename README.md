@@ -17,10 +17,11 @@ phones, progressive cost forecasting — built on entirely free, keyless service
 - **Map** — full-screen loop route, numbered squircle markers color-coded by day,
   day filter chips, fly-to camera moves.
 - **Live blip** — a real GPS dot (with its accuracy halo) for where the phone
-  actually is, off by default and never shared or stored. Tap ▶ and the route
-  simulation picks up from the point on the route closest to that blip and
-  drives the rest of the loop; with location off it falls back to where the
-  schedule says you'd be.
+  actually is. Off until you switch it on in **More → My location** (or tap the
+  map's locate button), remembered per device, and never shared or stored. Tap
+  ▶ and the route simulation picks up from the point on the route closest to
+  that blip and drives the rest of the loop; with location off it falls back to
+  where the schedule says you'd be.
 - **Custom route shaping** — tap the route line to drop an invisible shaping
   point, drag it onto the road you want (Hwy 1 over I-5), OSRM re-routes through
   it. Tap the dot to remove. Shaping points never appear in the itinerary.
