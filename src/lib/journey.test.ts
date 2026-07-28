@@ -305,6 +305,10 @@ describe("liveDistance with per-stop anchors", () => {
     expect(at(10, 0, anchored)).toBeGreaterThan(0.5);
   });
 
+  it("carries each segment's drive time onto the anchor it leads to", () => {
+    expect(j.legs[0].anchors.map((a) => a.driveS)).toEqual([0, 7200, 7200]);
+  });
+
   it("falls back to the day-wide sweep when the route has no segments yet", () => {
     const bare = buildJourney([day1], {
       A: { ...segRoute, segments: [] },
@@ -313,6 +317,97 @@ describe("liveDistance with per-stop anchors", () => {
     const d = liveDistance(bare, days, stops, withStay, new Date(2026, 6, 27, 12, 30));
     // 9:00→16:00 swept linearly: 3.5h of 7h
     expect(d / bare.totalDist).toBeCloseTo(0.5, 2);
+  });
+});
+
+// A later day's departure is *derived*, not assumed: 9:00 is only the default,
+// and a start_time on the first stop we drive to re-times the morning in either
+// direction — exactly what the Days card renders as "Leave by …".
+describe("liveDistance honors a later day's real departure", () => {
+  const d1 = makeDay("A", 1, "2026-07-27");
+  const d2 = makeDay("B", 2, "2026-07-28");
+  const days = [d1, d2];
+  // Day 2 wakes up at day 1's last stop (a2) and drives a2 → b1 → b2.
+  const stops = [
+    makeStop("a1", "A", 1),
+    makeStop("a2", "A", 2),
+    makeStop("b1", "B", 1),
+    makeStop("b2", "B", 2),
+  ];
+  const legB = (driveS: number): DayRoute => ({
+    dayId: "B",
+    coordinates: [
+      [1, 0],
+      [2, 0],
+      [3, 0],
+    ],
+    segments: [
+      { fromStopId: "a2", toStopId: "b1", distanceM: 111000, durationS: driveS },
+      { fromStopId: "b1", toStopId: "b2", distanceM: 111000, durationS: 7200 },
+    ],
+    distanceM: 222000,
+    durationS: driveS + 7200,
+  });
+  const sched = (arrivalMin: number, departMin: number, anchored = false) => ({
+    arrivalMin,
+    departMin,
+    anchored,
+  });
+
+  // The reported bug, to scale: a 1:00 PM stop two hours up the coast means we
+  // don't pull out of last night's hotel until 10:52 — not 9:00.
+  const j = buildJourney(days, { A: routes.A, B: legB(7680) }); // 2h08m morning drive
+  const late = new Map([
+    ["a1", sched(540, 540)],
+    ["a2", sched(600, 600)],
+    ["b1", sched(780, 780, true)], // pinned to 1:00 PM
+    ["b2", sched(900, 900)],
+  ]);
+  const at = (h: number, m: number, schedule = late, journey = j) =>
+    liveDistance(journey, days, stops, schedule, new Date(2026, 6, 28, h, m));
+  const legSpan = () => j.legs[1].endDist - j.legs[1].startDist;
+
+  it("stays parked at last night's stay until the derived departure", () => {
+    // 10:16 — the old 9:00 assumption had the marker 36 miles up the road
+    expect(at(10, 16)).toBe(j.legs[1].startDist);
+    expect(at(10, 51)).toBe(j.legs[1].startDist);
+  });
+
+  it("drives the morning leg on the drive's own clock, not a stretched one", () => {
+    // 10:52 → 13:00 is 2h08m: 11:56 is halfway to b1, which is half the leg
+    expect(at(11, 56)).toBeCloseTo(j.legs[1].startDist + legSpan() * 0.25, -1);
+    expect(at(13, 0)).toBeCloseTo(j.legs[1].startDist + legSpan() * 0.5, -1);
+  });
+
+  it("leaves early when the anchor pulls the morning earlier than 9:00", () => {
+    // a 7:30 stop six minutes away → gone by 7:24
+    const early = buildJourney(days, { A: routes.A, B: legB(360) });
+    const dawn = new Map([
+      ["a1", sched(540, 540)],
+      ["a2", sched(600, 600)],
+      ["b1", sched(450, 450, true)], // pinned to 7:30 AM
+      ["b2", sched(570, 570)],
+    ]);
+    const span = early.legs[1].endDist - early.legs[1].startDist;
+    expect(at(7, 20, dawn, early)).toBe(early.legs[1].startDist);
+    expect(at(7, 27, dawn, early)).toBeCloseTo(
+      early.legs[1].startDist + span * 0.25,
+      -1,
+    );
+    expect(at(7, 30, dawn, early)).toBeCloseTo(early.legs[1].startDist + span * 0.5, -1);
+  });
+
+  it("still defaults to 9:00 when nothing anchors the day", () => {
+    // unanchored: the schedule's own arrival is 9:00 + the drive, so the
+    // derived departure lands right back on the default
+    const plain = new Map([
+      ["a1", sched(540, 540)],
+      ["a2", sched(600, 600)],
+      ["b1", sched(540 + 128, 540 + 128)],
+      ["b2", sched(788, 788)],
+    ]);
+    expect(at(8, 59, plain)).toBe(j.legs[1].startDist);
+    expect(at(10, 4, plain)).toBeCloseTo(j.legs[1].startDist + legSpan() * 0.25, -1);
   });
 });
 
