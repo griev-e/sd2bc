@@ -25,17 +25,33 @@ import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { StopKindIcon, WeatherIcon } from "@/components/CategoryIcon";
 import { IconGrip, IconMoon, IconPin, IconPlus, IconSparkle, IconTrash } from "@/components/Icons";
+import NavAppSheet from "@/components/NavAppSheet";
 import Sheet from "@/components/Sheet";
 import StopEditSheet from "@/components/StopEditSheet";
 import SuggestSheet from "@/components/SuggestSheet";
+import TodayPanel from "@/components/TodayPanel";
 import { clusterKey, clusterStops } from "@/lib/clusters";
 import { dayColor, KIND_COLOR } from "@/lib/colors";
-import { directionsOptions, type NavOption } from "@/lib/directions";
+import { directionsOptions } from "@/lib/directions";
+import { DEFAULT_TANK_GAL, planFuel, type FuelWarning } from "@/lib/fuel";
 import { FADE, riseIn, SPRING } from "@/lib/motion";
 import { dayEmoji, NATURE_EMOJI } from "@/lib/emoji";
-import { fmtClock, fmtDate, fmtDuration, fmtMiles, fmtStay } from "@/lib/format";
+import {
+  fmtClock,
+  fmtDate,
+  fmtDuration,
+  fmtMiles,
+  fmtStay,
+  localDateISO,
+} from "@/lib/format";
 import type { LngLat } from "@/lib/geo";
-import { type StopSchedule, useSchedule } from "@/lib/schedule";
+import {
+  DAY_START_MIN,
+  dayDepartMin,
+  minutesToHHMM,
+  type StopSchedule,
+  useSchedule,
+} from "@/lib/schedule";
 import { stopsForDay, useOrderedDays, useTrip } from "@/lib/store";
 import { type ClusterWeather, useWeather, weatherKind } from "@/lib/weather";
 import type { Day, DayRoute, Stop } from "@/lib/types";
@@ -46,8 +62,27 @@ export default function DaysPage() {
   const routeError = useTrip((s) => s.routeError);
   const refreshRoutes = useTrip((s) => s.refreshRoutes);
   const addDay = useTrip((s) => s.addDay);
+  const trip = useTrip((s) => s.trip);
+  const stops = useTrip((s) => s.stops);
 
   const orderedDays = useOrderedDays();
+  const todayIso = localDateISO();
+
+  // One walk of the whole trip's tank, shared by every day card below —
+  // running out of gas is a trip-wide question, not a per-day one.
+  const fuel = useMemo(
+    () =>
+      trip
+        ? planFuel(
+            orderedDays,
+            stops,
+            routes,
+            Number(trip.mpg),
+            Number(trip.tank_gal ?? DEFAULT_TANK_GAL),
+          )
+        : null,
+    [trip, orderedDays, stops, routes],
+  );
 
   const totals = useMemo(() => {
     let dist = 0;
@@ -96,6 +131,9 @@ export default function DaysPage() {
       </header>
 
       <div className="space-y-3.5 px-4 pt-4">
+        {/* what's happening right now, above the whole plan */}
+        <TodayPanel />
+
         <AnimatePresence>
           {orderedDays.map((day, i) => (
             <DayCard
@@ -105,6 +143,10 @@ export default function DaysPage() {
               index={i}
               total={orderedDays.length}
               route={routes[day.id]}
+              isToday={day.date === todayIso}
+              // Today's warnings are already on the panel directly above this
+              // card — showing them twice, stacked, reads as two problems.
+              fuelWarnings={day.date === todayIso ? [] : (fuel?.byDay[day.id] ?? [])}
               onEditStop={setEditStop}
               onAddStop={() => setAddForDay(day.id)}
               onSuggest={() => setSuggestForDay(day.id)}
@@ -147,6 +189,8 @@ function DayCard({
   index,
   total,
   route,
+  isToday,
+  fuelWarnings,
   onEditStop,
   onAddStop,
   onSuggest,
@@ -157,6 +201,9 @@ function DayCard({
   index: number;
   total: number;
   route?: DayRoute;
+  /** Today's card wears the accent edge so it's findable in a long list. */
+  isToday: boolean;
+  fuelWarnings: FuelWarning[];
   onEditStop: (s: Stop) => void;
   onAddStop: () => void;
   onSuggest: () => void;
@@ -169,6 +216,7 @@ function DayCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [departOpen, setDepartOpen] = useState(false);
   const setSelectedDay = useTrip((s) => s.setSelectedDay);
   const setSelectedStop = useTrip((s) => s.setSelectedStop);
 
@@ -228,6 +276,16 @@ function DayCard({
       ? ((firstSched.arrivalMin - morningSeg.durationS / 60) % 1440 + 1440) % 1440
       : undefined;
 
+  // A pinned stop time outranks the day's own clock — when one is doing the
+  // driving, say "Leave by" and let the sheet explain why the picker won't move
+  // it. Otherwise this is simply when the day pulls out.
+  const anchoredByStop = Boolean(firstSched?.anchored) && leaveMin !== undefined;
+  const departMin = dayDepartMin(day, index === 0 ? dayStops[0] : undefined);
+  /** Day one's clock lives on its origin stop, not on the day. */
+  const originHasTime = index === 0 && dayStops[0]?.start_time != null;
+  /** Something deliberately set this departure — worth the accent. */
+  const departPinned = anchoredByStop || originHasTime || day.start_time != null;
+
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
@@ -251,6 +309,8 @@ function DayCard({
       exit={{ opacity: 0, transition: FADE }}
       transition={{ ...enter.transition, layout: SPRING }}
       className="card p-4"
+      // today is the card you're looking for in a fifteen-day list
+      style={isToday ? { borderColor: "var(--accent)" } : undefined}
     >
       <div className="flex items-center gap-3">
         <button
@@ -301,23 +361,32 @@ function DayCard({
         </button>
       </div>
 
-      {(morningSeg || dayStops.length > 0) && <div className="hairline-t mt-3.5" />}
+      <div className="hairline-t mt-3.5" />
 
-      {morningSeg && (
-        <p className="tnum mt-2.5 pl-[26px] text-[11px] text-fg-faint">
-          {leaveMin !== undefined && (
-            <span
-              className={firstSched?.anchored ? "font-semibold text-accent" : "text-fg-muted"}
-            >
-              {firstSched?.anchored ? "Leave by " : "Leave ~"}
-              {fmtClock(leaveMin)}
-              {" · "}
-            </span>
-          )}
-          {fmtMiles(morningSeg.distanceM)} · {fmtDuration(morningSeg.durationS)}
-          {" from last night's stay"}
-        </p>
-      )}
+      {/* When the day pulls out — tap to set it. Every ETA below cascades
+          from this one clock, so it belongs on the card, not buried. */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-[26px]">
+        <button
+          onClick={() => setDepartOpen(true)}
+          aria-label={`Set departure time for day ${day.seq}`}
+          className="pressable tnum rounded-md px-1.5 py-0.5 text-[11px] font-semibold"
+          style={
+            departPinned
+              ? { background: "var(--accent-soft)", color: "var(--accent)" }
+              : { color: "var(--fg-muted)" }
+          }
+        >
+          {anchoredByStop
+            ? `Leave by ${fmtClock(leaveMin!)}`
+            : `Depart ${fmtClock(departMin)}`}
+        </button>
+        {morningSeg && (
+          <span className="tnum text-[11px] text-fg-faint">
+            {fmtMiles(morningSeg.distanceM)} · {fmtDuration(morningSeg.durationS)}
+            {" from last night's stay"}
+          </span>
+        )}
+      </div>
 
       {dayStops.length === 0 && (
         <p className="mt-3 rounded-xl bg-fg/[0.03] px-3 py-2.5 text-center text-xs text-fg-faint">
@@ -345,6 +414,19 @@ function DayCard({
           </ol>
         </SortableContext>
       </DndContext>
+
+      {fuelWarnings.map((w) => (
+        <p
+          key={w.toStopId}
+          className="mt-3 rounded-xl bg-coral-soft px-3 py-2 text-[11px] font-medium leading-4 text-coral"
+        >
+          ⛽{" "}
+          {w.legAlone
+            ? `${fmtMiles(w.sinceFuelM)} without a stop — that's more than one tank.`
+            : `${fmtMiles(w.sinceFuelM)} since the last fuel stop by ${w.toStopName}.`}{" "}
+          Mark a stop as Fuel to plan the fill-up.
+        </p>
+      ))}
 
       <div className="mt-3 flex gap-2">
         <button
@@ -399,48 +481,115 @@ function DayCard({
 
       <DayEmojiSheet day={day} open={emojiOpen} onClose={() => setEmojiOpen(false)} />
       <NavAppSheet
-        day={day}
+        title={`Navigate ${day.title || `Day ${day.seq}`}`}
         options={navOptions}
         open={navOpen}
         onClose={() => setNavOpen(false)}
+      />
+      <DayDepartSheet
+        day={day}
+        departMin={departMin}
+        anchoredByStop={anchoredByStop}
+        anchorName={anchoredByStop || originHasTime ? dayStops[0]?.name : undefined}
+        originHasTime={originHasTime}
+        open={departOpen}
+        onClose={() => setDepartOpen(false)}
       />
     </motion.section>
   );
 }
 
-/** Bottom sheet to pick which navigation app opens this day's drive. */
-function NavAppSheet({
+/**
+ * When this day pulls out.
+ *
+ * The whole day's ETAs cascade from one clock, and until now that clock was a
+ * hardcoded 9:00 for every day after the first — so "Day 6 we're sleeping in"
+ * had no way to be said except by pinning a time to a stop, which means
+ * something different. A stop's own start_time still wins where one exists
+ * (a check-in is a commitment; a departure is a preference), and the sheet says
+ * so rather than silently ignoring the picker.
+ */
+function DayDepartSheet({
   day,
-  options,
+  departMin,
+  anchoredByStop,
+  anchorName,
+  originHasTime,
   open,
   onClose,
 }: {
   day: Day;
-  options: NavOption[];
+  departMin: number;
+  anchoredByStop: boolean;
+  anchorName?: string;
+  /** Day one's departure lives on the origin stop, not the day. */
+  originHasTime: boolean;
   open: boolean;
   onClose: () => void;
 }) {
+  const updateDay = useTrip((s) => s.updateDay);
+  const [draft, setDraft] = useState(day.start_time ?? minutesToHHMM(departMin));
+  /** A stop's own time is running this day — the day-level clock is inert. */
+  const overridden = originHasTime || anchoredByStop;
+
+  // Re-seed when the sheet reopens on a day whose time changed elsewhere.
+  const [lastKey, setLastKey] = useState(day.start_time);
+  if (day.start_time !== lastKey) {
+    setLastKey(day.start_time);
+    setDraft(day.start_time ?? minutesToHHMM(departMin));
+  }
+
   return (
-    <Sheet open={open} onClose={onClose} title={`Navigate ${day.title || `Day ${day.seq}`}`}>
-      <div className="flex flex-col gap-2">
-        {options.map((opt) => (
-          <a
-            key={opt.provider}
-            href={opt.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={onClose}
-            className="pressable flex items-center gap-3 rounded-xl bg-fg/[0.03] px-4 py-3.5 text-sm font-semibold"
+    // A pinned stop time fully determines the day's departure, so offering a
+    // picker there would be a control that silently does nothing. Say what's
+    // driving the clock and where to change it instead.
+    <Sheet open={open} onClose={onClose} title={`${day.title || `Day ${day.seq}`} departure`}>
+      <div className="space-y-4">
+        <p className="text-xs leading-5 text-fg-muted">
+          {originHasTime
+            ? `Day one leaves when its first stop says. ${anchorName ?? "The origin"} has a time of its own, and a pinned stop wins over a day's preference — clear it there to set the departure here.`
+            : anchoredByStop
+              ? `${anchorName ?? "The first stop"} has a pinned time, so this day's departure is worked backwards from it. Clear that stop's time to set the departure directly.`
+              : "Every arrival below is estimated from this clock. Leave it unset to use the usual 9:00 AM start."}
+        </p>
+
+        {!overridden && (
+          <>
+            <input
+              type="time"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              aria-label="Departure time"
+              className="field tnum w-full text-center text-lg font-semibold"
+            />
+
+            <button
+              disabled={!draft}
+              onClick={() => {
+                void updateDay(day.id, { start_time: draft });
+                onClose();
+              }}
+              className="btn-primary pressable h-12 w-full rounded-xl font-semibold disabled:opacity-40"
+            >
+              Set departure
+            </button>
+          </>
+        )}
+
+        {day.start_time && (
+          <button
+            onClick={() => {
+              void updateDay(day.id, { start_time: null });
+              onClose();
+            }}
+            className="btn-ghost pressable h-11 w-full rounded-xl text-sm font-semibold"
           >
-            <IconPin size={16} className="text-fg-faint" />
-            {opt.label}
-          </a>
-        ))}
+            {overridden
+              ? "Clear this day's unused departure"
+              : `Use the default (${fmtClock(DAY_START_MIN)})`}
+          </button>
+        )}
       </div>
-      <p className="mt-3 px-1 text-[11px] leading-relaxed text-fg-faint">
-        Google Maps follows every stop in order. Apple Maps chains the stops too;
-        Waze navigates to the last stop from where you are.
-      </p>
     </Sheet>
   );
 }

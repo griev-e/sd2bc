@@ -14,6 +14,7 @@ function makeStop(id: string, lat: number, lng: number): Stop {
     kind: "stop",
     is_overnight: false,
     notes: "",
+  address: null,
     lodging_url: null,
     lodging_free: false,
     lodging_cost: null,

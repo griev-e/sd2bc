@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import AttributionDot from "@/components/Attribution";
 import CountdownPill from "@/components/CountdownPill";
 import { IconCamera } from "@/components/Icons";
+import OfflineCard from "@/components/OfflineCard";
 import { displayName } from "@/lib/format";
 import { buildItineraryIcs } from "@/lib/ics";
 import {
@@ -138,6 +139,9 @@ export default function MorePage() {
 
         {/* live location — the one thing here that needs a browser permission */}
         <LocationCard partnerName={displayName(partner)} />
+
+        {/* dead-zone readiness: trip data + the map behind it */}
+        <OfflineCard />
 
         {/* map marker — the vehicle that rides the route */}
         <section className="card p-5">

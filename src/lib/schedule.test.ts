@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getSchedule, hhmmToMinutes, minutesToHHMM } from "./schedule";
+import { DAY_START_MIN, dayDepartMin, getSchedule, hhmmToMinutes, minutesToHHMM } from "./schedule";
 import type { Day, DayRoute, Stop } from "./types";
 
 describe("hhmmToMinutes / minutesToHHMM", () => {
@@ -17,7 +17,12 @@ describe("hhmmToMinutes / minutesToHHMM", () => {
   });
 });
 
-function makeDay(id: string, seq: number, date: string): Day {
+function makeDay(
+  id: string,
+  seq: number,
+  date: string,
+  overrides: Partial<Day> = {},
+): Day {
   return {
     id,
     trip_id: "trip-1",
@@ -26,8 +31,10 @@ function makeDay(id: string, seq: number, date: string): Day {
     title: "",
     notes: "",
     emoji: null,
+    start_time: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -48,6 +55,7 @@ function makeStop(
     kind: "stop",
     is_overnight: false,
     notes: "",
+    address: null,
     lodging_url: null,
     lodging_free: false,
     lodging_cost: null,
@@ -131,5 +139,82 @@ describe("getSchedule", () => {
 
     const third = getSchedule([...days], stops, routes);
     expect(third).not.toBe(first);
+  });
+});
+
+describe("dayDepartMin", () => {
+  const day = makeDay("dayA", 1, "2026-07-27");
+
+  it("falls back to the app-wide default", () => {
+    expect(dayDepartMin(day)).toBe(DAY_START_MIN);
+  });
+
+  it("uses the day's own start_time when set", () => {
+    expect(dayDepartMin(makeDay("dayA", 1, "2026-07-27", { start_time: "11:00" }))).toBe(660);
+  });
+
+  it("lets day one's origin stop outrank the day", () => {
+    const sleepIn = makeDay("dayA", 1, "2026-07-27", { start_time: "11:00" });
+    const origin = makeStop("origin", "dayA", 1, { start_time: "06:30" });
+    expect(dayDepartMin(sleepIn, origin)).toBe(390);
+    // …but an origin with no time of its own leaves the day in charge
+    expect(dayDepartMin(sleepIn, makeStop("origin", "dayA", 1))).toBe(660);
+  });
+});
+
+describe("getSchedule with a per-day departure", () => {
+  it("shifts a later day's whole chain when the day sleeps in", () => {
+    const dayA = makeDay("dayA", 1, "2026-07-27");
+    const dayB = makeDay("dayB", 2, "2026-07-28", { start_time: "11:00" });
+    const origin = makeStop("origin", "dayA", 1);
+    const stopA2 = makeStop("stopA2", "dayA", 2);
+    const stopB1 = makeStop("stopB1", "dayB", 1);
+
+    const routes: Record<string, DayRoute> = {
+      dayA: makeRoute("dayA", [
+        { fromStopId: "origin", toStopId: "stopA2", distanceM: 0, durationS: 3600 },
+      ]),
+      dayB: makeRoute("dayB", [
+        { fromStopId: "stopA2", toStopId: "stopB1", distanceM: 0, durationS: 1800 },
+      ]),
+    };
+
+    const schedule = getSchedule([dayA, dayB], [origin, stopA2, stopB1], routes);
+    // day one is untouched by day two's lie-in
+    expect(schedule.get("stopA2")?.arrivalMin).toBe(600);
+    // 11:00 (660) + 30 min drive = 690, instead of the 570 a 9:00 start gives
+    expect(schedule.get("stopB1")?.arrivalMin).toBe(690);
+  });
+
+  it("lets day one's origin stop still win over the day's time", () => {
+    const dayA = makeDay("dayA", 1, "2026-07-27", { start_time: "10:00" });
+    const origin = makeStop("origin", "dayA", 1, { start_time: "08:00" });
+    const stopA2 = makeStop("stopA2", "dayA", 2);
+
+    const routes: Record<string, DayRoute> = {
+      dayA: makeRoute("dayA", [
+        { fromStopId: "origin", toStopId: "stopA2", distanceM: 0, durationS: 3600 },
+      ]),
+    };
+
+    const schedule = getSchedule([dayA, dayA].slice(0, 1), [origin, stopA2], routes);
+    expect(schedule.get("origin")?.departMin).toBe(480);
+    expect(schedule.get("stopA2")?.arrivalMin).toBe(540);
+  });
+
+  it("uses the day's time for day one when the origin has none", () => {
+    const dayA = makeDay("dayA", 1, "2026-07-27", { start_time: "10:00" });
+    const origin = makeStop("origin", "dayA", 1);
+    const stopA2 = makeStop("stopA2", "dayA", 2);
+
+    const routes: Record<string, DayRoute> = {
+      dayA: makeRoute("dayA", [
+        { fromStopId: "origin", toStopId: "stopA2", distanceM: 0, durationS: 3600 },
+      ]),
+    };
+
+    const schedule = getSchedule([dayA], [origin, stopA2], routes);
+    expect(schedule.get("origin")?.departMin).toBe(600);
+    expect(schedule.get("stopA2")?.arrivalMin).toBe(660);
   });
 });

@@ -57,6 +57,15 @@ export function fmtClock(minutes: number): string {
   return `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
 }
 
+/** "48 MB" / "1.2 GB" — storage sizes, in the units a phone's settings use. */
+export function fmtBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  const mb = bytes / 1_000_000;
+  if (mb < 1) return "<1 MB";
+  if (mb < 1000) return `${Math.round(mb)} MB`;
+  return `${(mb / 1000).toFixed(1)} GB`;
+}
+
 /** "1h 30m" / "45m" for a planned length of stay. */
 export function fmtStay(minutes: number): string {
   if (minutes < 60) return `${minutes}m`;

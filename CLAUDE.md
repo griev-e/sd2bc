@@ -36,18 +36,19 @@ search), **Open-Meteo** (weather). See `src/lib/config.ts` for every endpoint.
 
 ```bash
 npm install
-npm run dev      # next dev — local development
-npm run build    # next build — production build (run before pushing UI changes)
-npm run lint     # eslint (next/core-web-vitals + next/typescript)
-npm test         # vitest — unit tests for the lib domain layer
+npm run dev        # next dev — local development
+npm run build      # next build — production build (run before pushing UI changes)
+npm run lint       # eslint (next/core-web-vitals + next/typescript)
+npm run typecheck  # tsc --noEmit — covers test files too, which next build does not
+npm test           # vitest — unit tests for the lib domain layer
 ```
 
 Unit tests (Vitest) cover the pure domain layer in `src/lib/*.test.ts` — run
-`npm test`. There is no CI workflow in the repo, so verify changes by running
-`npm run lint`, `npm test`, and `npm run build`, and by exercising the affected
-flow in `npm run dev`. `npm run build` is the real typecheck gate (`tsc
---noEmit` runs as part of it) since the project has no standalone `typecheck`
-script.
+`npm test`. `.github/workflows/ci.yml` runs lint → typecheck → test → build on
+every push and PR, but run them locally too, and exercise the affected flow in
+`npm run dev`. Use `npm run typecheck`, not `npm run build`, as the type gate:
+`next build` does not typecheck the `*.test.ts` fixtures, so a field added to a
+row type can pass a build and still be wrong.
 
 ## Layout
 
@@ -82,6 +83,11 @@ src/
 | `config.ts` | All external endpoints + Supabase credentials. |
 | `supabase.ts` | Browser Supabase singleton; `usernameToEmail()`. |
 | `outbox.ts` | Offline write queue: network-failed mutations park here (optimistic state kept) and replay FIFO on reconnect. |
+| `snapshot.ts` | The device's offline copy of the trip. **IndexedDB** is the store of record — one day's route geometry is 100–460 KB, so ten days blow the ~5 MB localStorage quota (counted in UTF-16 units), which used to fail silently inside a bare `catch`. localStorage survives only as a fallback for browsers that refuse IndexedDB, and then holds a *lean* snapshot (`leanSnapshot()` strips route coordinates; distances, segments and ETAs stay). `getSnapshotStatus()` reports where it landed so the More tab can say so. |
+| `today.ts` | `buildToday()` — the live-trip view: which day we're on, the next stop still ahead of the clock, what's left to drive, tonight's stay. Pure; powers `TodayPanel`. |
+| `fuel.ts` | `planFuel()` — walks the whole trip's tank (carried across day boundaries), flagging every stretch that outruns `mpg × tank_gal × FUEL_RESERVE`. A stop of kind `fuel` resets the count, so the warnings are also the fix. Pure. |
+| `tiles.ts` | Slippy-map tile math for the offline map download: which tiles a route corridor touches at each zoom, plus style/sprite/glyph URL extraction. Pure. |
+| `offlineMaps.ts` | Drives the "Download maps for this trip" run (Zustand): resolves both styles, plans tiles, fetches them through the service worker on a 6-wide pool. |
 | `budget.ts` | `computeBudget()` — the whole cost forecast as one pure function, shared by the Budget tab and the AI analyzer. |
 | `directions.ts` | Keyless Google Maps directions deep link for a day's drive. |
 | `ics.ts` | Client-side iCalendar export of the itinerary (one all-day event per day). |
@@ -135,11 +141,12 @@ Conventions every mutation follows — **match these when adding one**:
     touch `init()`.
   - Missed events are never replayed, so the store does a full `refetchAll()`
     after any channel drop and when the app returns to the foreground.
-- **Offline resilience.** The last good load is persisted to localStorage
-  (`coastline-snapshot-v1`) and hydrated when `init()` can't reach Supabase;
-  a service worker (`public/sw.js`) keeps the app shell openable offline. A
-  failed load with no snapshot sets `loadError`, which the tabs layout renders
-  as a retry screen.
+- **Offline resilience.** The last good load is persisted per device by
+  `lib/snapshot.ts` (IndexedDB, falling back to a lean localStorage copy) and
+  hydrated when `init()` can't reach Supabase; a service worker
+  (`public/sw.js`) keeps the app shell openable offline and cache-firsts
+  OpenFreeMap tiles. A failed load with no snapshot sets `loadError`, which the
+  tabs layout renders as a retry screen. Sign-out clears the snapshot.
 - **`seq` ordering.** Ordered lists (stops within a day, days, packing within a
   category) use an integer `seq`. New `seq` is `max(existing) + 1`, **never
   `count + 1`** — deletions leave gaps and count+1 would collide. Reordering
@@ -148,6 +155,11 @@ Conventions every mutation follows — **match these when adding one**:
 - **Via (shaping) points** are route-only: they bend the OSRM line but never
   appear in the itinerary and are never real stops. Deleting a stop cascades to
   its via points locally and in the DB.
+- **`routes` is keyed by day id and must be pruned.** It's written
+  incrementally as each day resolves, so a deleted day's entry survives until a
+  fully-successful batch replaces the map wholesale — and the Itinerary header
+  sums `Object.values(routes)`, so a stale entry pads the trip's total miles.
+  `pruneRoutes()` runs on the routing-error path and in `deleteDay`.
 - **Route computation** is debounced (`scheduleRoutes`, 500ms) and re-runs only
   when route *geometry* changed — `routeGeometryChanged()` compares incoming
   Realtime rows against local state on the fields that feed `dayRoutePoints()`,
@@ -192,6 +204,12 @@ The whole app is designed to never hammer a free public endpoint:
   independent mirrors (staggered start, first good answer wins, losers aborted)
   and treats an HTTP-200 `remark`/empty-elements response as a failure. Results
   cached ~2 days in `poi_cache` (rows are purged server-side by pg_cron).
+- **OpenFreeMap** tiles are cache-first in the service worker, bounded to
+  `MAX_MAP_ENTRIES` and evicted oldest-first. The bulk download (More →
+  Offline) is **an explicit tap only**, capped at `MAX_TILES` with coarse zooms
+  kept first, and runs 6-wide. Zoom stops at 11 on purpose: vector tiles
+  overzoom, so z11 still renders at z16 and each extra level would be 4× the
+  tiles. Satellite (Esri raster) is deliberately *not* cached.
 - **Nominatim** search is debounced and only fires from explicit user input.
 - **Open-Meteo** forecasts are cached ~30 min and requested once per stop
   cluster, not per stop.
@@ -283,7 +301,8 @@ removed).
   `lib`, thorough explanatory comments on non-obvious decisions (caching,
   concurrency, timezone traps), and optimistic-with-rollback mutations. Keep
   that texture.
-- Before pushing, run `npm run lint`, `npm test`, **and** `npm run build`.
+- Before pushing, run `npm run lint`, `npm run typecheck`, `npm test`, **and**
+  `npm run build` — the same four CI runs.
 - Keep changes free-service-friendly and RLS-safe. If a change needs a schema
   migration, it happens in Supabase (via the Supabase MCP) and `types.ts` must
   be updated to match — the repo has no migration files to edit.

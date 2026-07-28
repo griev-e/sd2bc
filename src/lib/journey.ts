@@ -20,7 +20,7 @@
 
 import { closestOnSegment, haversineM, type LngLat } from "./geo";
 import { localDateISO } from "./format";
-import { DAY_START_MIN, type StopSchedule } from "./schedule";
+import { dayDepartMin, type StopSchedule } from "./schedule";
 import { bySeq, type Day, type DayRoute, type RouteSegment, type Stop } from "./types";
 
 /* ---- vehicle preference (device-local, like theme) --------------------- */
@@ -297,31 +297,33 @@ export function nearestOnJourney(journey: Journey, p: LngLat): NearestOnJourney 
  * When the day actually pulls out of wherever it started — the clock the marker
  * waits for before it moves an inch.
  *
- * 9:00 ({@link DAY_START_MIN}) is only the *default*. A `start_time` on the
- * first stop the day drives to re-anchors the whole day, in either direction:
- * a 1:00 PM check-in two hours up the coast means we're still at last night's
- * hotel until 10:52, and a 7:30 AM tour six minutes away means we're gone by
- * 7:24. The Days card already shows exactly that ("Leave by …" = the first
- * arrival minus the morning drive), so the marker derives it the same way —
- * otherwise the map has us thirty miles up the road while the itinerary is
- * still telling us not to leave yet.
+ * The day's own `start_time` sets it, falling back to the app-wide 9:00
+ * default (see {@link dayDepartMin}). A `start_time` on the first stop it drives to
+ * then re-anchors the whole day, in either direction: a 1:00 PM check-in two
+ * hours up the coast means we're still at last night's hotel until 10:52, and a
+ * 7:30 AM tour six minutes away means we're gone by 7:24. The Days card already
+ * shows exactly that ("Leave by …" = the first arrival minus the morning
+ * drive), so the marker derives it the same way — otherwise the map has us
+ * thirty miles up the road while the itinerary is still telling us not to
+ * leave yet.
  *
  * Day one is the exception: its leg begins at the origin stop itself rather
  * than at a previous night's stay, so the origin's own time *is* the departure.
  */
 function departMinFor(
   dayIdx: number,
+  day: Day,
   leg: JourneyLeg,
   first: Stop | undefined,
   schedule: Map<string, StopSchedule>,
 ): number {
   if (dayIdx === 0) {
-    return (first && schedule.get(first.id)?.departMin) ?? DAY_START_MIN;
+    return (first && schedule.get(first.id)?.departMin) ?? dayDepartMin(day, first);
   }
   // anchors[1] is the first stop the day drives to; anchors[0] is where we woke up
   const morning = leg.anchors[1];
   const arrival = morning ? schedule.get(morning.stopId)?.arrivalMin : undefined;
-  return arrival != null ? arrival - morning.driveS / 60 : DAY_START_MIN;
+  return arrival != null ? arrival - morning.driveS / 60 : dayDepartMin(day);
 }
 
 /**
@@ -375,7 +377,7 @@ export function liveDistance(
   const first = dayStops[0];
   const last = dayStops[dayStops.length - 1];
   const nowMin = now.getHours() * 60 + now.getMinutes();
-  const depart = departMinFor(dayIdx, leg, first, schedule);
+  const depart = departMinFor(dayIdx, day, leg, first, schedule);
 
   // Preferred path: hop stop to stop on the schedule's own times.
   if (leg.anchors.length >= 2) {

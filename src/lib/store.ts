@@ -15,6 +15,12 @@ import {
 } from "./outbox";
 import type { LngLat } from "./geo";
 import {
+  clearSnapshot,
+  loadSnapshot,
+  saveSnapshot,
+  type Snapshot,
+} from "./snapshot";
+import {
   bySeq,
   type ActivityEntry,
   type AnalysisInsight,
@@ -204,36 +210,24 @@ export function routeGeometryChanged(
 }
 
 /**
- * Offline snapshot: the last good load, persisted per device. When the trip
- * is opened in a dead zone the itinerary still shows (read-only in effect —
- * writes fail and roll back). Routes ride along so distances/ETAs survive.
+ * Only routes for days that still exist.
+ *
+ * `routes` is keyed by day id and is written incrementally as each day
+ * resolves, so a deleted day's route lingers until a fully-successful batch
+ * replaces the map wholesale. That stale entry is real money on screen: the
+ * Itinerary header sums `Object.values(routes)`, so a removed day keeps
+ * padding the trip's total miles and drive time.
  */
-const SNAPSHOT_KEY = "coastline-snapshot-v1";
-type Snapshot = Pick<
-  TripState,
-  | "profiles"
-  | "trip"
-  | "days"
-  | "stops"
-  | "viaPoints"
-  | "packing"
-  | "gameEvents"
-  | "analyses"
-  | "routes"
->;
-
-function loadSnapshot(): Snapshot | null {
-  try {
-    const raw = localStorage.getItem(SNAPSHOT_KEY);
-    if (!raw) return null;
-    const snap = JSON.parse(raw) as Snapshot;
-    if (!Array.isArray(snap.days) || !Array.isArray(snap.stops)) return null;
-    // snapshots written before the analyzer shipped have no analyses field
-    snap.analyses = Array.isArray(snap.analyses) ? snap.analyses : [];
-    return snap;
-  } catch {
-    return null;
+export function pruneRoutes(
+  routes: Record<string, DayRoute>,
+  days: { id: string }[],
+): Record<string, DayRoute> {
+  const live = new Set(days.map((d) => d.id));
+  const out: Record<string, DayRoute> = {};
+  for (const [dayId, route] of Object.entries(routes)) {
+    if (live.has(dayId)) out[dayId] = route;
   }
+  return out;
 }
 
 /** Ordered point list for one day's route; null stopId = shaping point. */
@@ -445,7 +439,11 @@ export const useTrip = create<TripState>((set, get) => {
 
     if (run !== routeRun) return;
     if (firstError) {
+      // A day that failed keeps whatever it had (better than a blank line), but
+      // days that no longer exist must go — otherwise the Itinerary header goes
+      // on counting a deleted day's miles until routing next succeeds outright.
       set({
+        routes: { ...pruneRoutes(get().routes, ordered), ...next },
         routesPending: false,
         routeError: firstError instanceof Error ? firstError.message : "Routing failed",
       });
@@ -615,7 +613,8 @@ export const useTrip = create<TripState>((set, get) => {
           if (get().userId !== userId) return;
           // Dead zone / flaky cell data: serve the last good load from this
           // device instead of a blank app. The first reconnect refetches.
-          const snap = typeof window !== "undefined" ? loadSnapshot() : null;
+          const snap = typeof window !== "undefined" ? await loadSnapshot() : null;
+          if (get().userId !== userId) return; // signed out while reading it
           if (snap) {
             channelWasDown = true;
             set({ ...snap, loaded: true });
@@ -711,6 +710,9 @@ export const useTrip = create<TripState>((set, get) => {
       // an init still in flight will notice the cleared userId and bail; the
       // next sign-in must start its own run, not join the doomed one
       initPromise = null;
+      // sign-out forgets the device's offline copy too — otherwise the next
+      // person to open the app gets this trip served out of the dead-zone cache
+      void clearSnapshot();
       if (channel) {
         supabase().removeChannel(channel);
         channel = null;
@@ -1034,6 +1036,7 @@ export const useTrip = create<TripState>((set, get) => {
         title: "",
         notes: "",
         emoji: null,
+        start_time: null,
         created_at: now,
         updated_at: now,
       };
@@ -1069,6 +1072,10 @@ export const useTrip = create<TripState>((set, get) => {
         stops: s.stops.filter((x) => x.day_id !== id),
         viaPoints: s.viaPoints.filter((v) => !stopIdSet.has(v.after_stop_id)),
         selectedDayId: s.selectedDayId === id ? null : s.selectedDayId,
+        // drop the day's route in the same beat — the recompute is debounced
+        // 500ms behind us, and until it lands the header would still be adding
+        // this day's miles to the trip total
+        routes: pruneRoutes(s.routes, remaining),
       });
       scheduleRoutes();
 
@@ -1348,35 +1355,51 @@ export function stopsForDay(stops: Stop[], dayId: string): Stop[] {
 
 // Persist the last good state per device (debounced) — init() falls back to
 // this when the trip is opened without a connection, so a dead zone never
-// blanks the itinerary.
+// blanks the itinerary. See lib/snapshot.ts for where it actually lands.
 if (typeof window !== "undefined") {
   let snapTimer: ReturnType<typeof setTimeout> | null = null;
+  // Saves are async now; never let two overlap, or a slow write could land
+  // after a newer one and reinstate older state as the "last good load".
+  let saving = false;
+  let dirty = false;
+
+  async function flushSnapshot() {
+    if (saving) {
+      dirty = true;
+      return;
+    }
+    saving = true;
+    try {
+      do {
+        dirty = false;
+        // re-check at fire time: a teardown (sign-out) inside the debounce
+        // window must not persist the emptied state as the "last good load" —
+        // that snapshot would later render a blank trip in a dead zone
+        const state = useTrip.getState();
+        if (!state.loaded) return;
+        const { profiles, trip, days, stops, viaPoints, packing, gameEvents, analyses, routes } =
+          state;
+        const snap: Snapshot = {
+          profiles,
+          trip,
+          days,
+          stops,
+          viaPoints,
+          packing,
+          gameEvents,
+          analyses,
+          routes,
+        };
+        await saveSnapshot(snap);
+      } while (dirty);
+    } finally {
+      saving = false;
+    }
+  }
+
   useTrip.subscribe((s) => {
     if (!s.loaded) return;
     if (snapTimer) clearTimeout(snapTimer);
-    snapTimer = setTimeout(() => {
-      // re-check at fire time: a teardown (sign-out) inside the debounce
-      // window must not persist the emptied state as the "last good load" —
-      // that snapshot would later render a blank trip in a dead zone
-      if (!useTrip.getState().loaded) return;
-      const { profiles, trip, days, stops, viaPoints, packing, gameEvents, analyses, routes } =
-        useTrip.getState();
-      const snap: Snapshot = {
-        profiles,
-        trip,
-        days,
-        stops,
-        viaPoints,
-        packing,
-        gameEvents,
-        analyses,
-        routes,
-      };
-      try {
-        localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
-      } catch {
-        // storage full or unavailable — the offline fallback just won't refresh
-      }
-    }, 1500);
+    snapTimer = setTimeout(() => void flushSnapshot(), 1500);
   });
 }
