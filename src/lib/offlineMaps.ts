@@ -95,6 +95,19 @@ async function resolveStyle(styleUrl: string): Promise<{
   return { assets, templates: [...new Set(templates)] };
 }
 
+/**
+ * The cancel signal plus a per-request deadline. Without the deadline a single
+ * stalled tile (mobile network handoff mid-download) holds one of six pool
+ * slots until the browser gives up on its own, and the progress bar just stops.
+ * `AbortSignal.any` is Safari 17.4+; older browsers keep the cancel button and
+ * lose only the per-request timeout.
+ */
+function requestSignal(cancel: AbortSignal): AbortSignal {
+  return typeof AbortSignal.any === "function"
+    ? AbortSignal.any([cancel, AbortSignal.timeout(FETCH_TIMEOUT_MS)])
+    : cancel;
+}
+
 /** Run `work` over `items` with a small fixed pool, stopping on abort. */
 async function pool<T>(
   items: T[],
@@ -196,7 +209,7 @@ export const useOfflineMaps = create<OfflineMapsState>((set, get) => ({
       try {
         // The SW answers from cache when it has it, so this is close to free
         // on a re-run. `signal` lets Cancel actually stop the queue.
-        const res = await fetch(url, { signal });
+        const res = await fetch(url, { signal: requestSignal(signal) });
         if (!res.ok) failed++;
       } catch {
         if (!signal.aborted) failed++;
