@@ -89,6 +89,12 @@ export interface JourneyAnchor {
   stopId: string;
   /** Meters from the trip's start. */
   dist: number;
+  /**
+   * Seconds of driving from the previous anchor (0 on the leg's first anchor,
+   * which nothing drives to). Lets {@link liveDistance} back a departure out of
+   * an arrival the same way the Days card's "Leave by" line does.
+   */
+  driveS: number;
 }
 
 /** One day's slice of the timeline, by distance. */
@@ -132,13 +138,16 @@ function legAnchors(
   if (segments.length === 0) return [];
   const total = segments.reduce((sum, seg) => sum + seg.distanceM, 0);
   const span = endDist - startDist;
-  const anchors: JourneyAnchor[] = [{ stopId: segments[0].fromStopId, dist: startDist }];
+  const anchors: JourneyAnchor[] = [
+    { stopId: segments[0].fromStopId, dist: startDist, driveS: 0 },
+  ];
   let run = 0;
   for (const seg of segments) {
     run += seg.distanceM;
     anchors.push({
       stopId: seg.toStopId,
       dist: total > 0 ? startDist + (run / total) * span : endDist,
+      driveS: seg.durationS,
     });
   }
   return anchors;
@@ -285,13 +294,44 @@ export function nearestOnJourney(journey: Journey, p: LngLat): NearestOnJourney 
 }
 
 /**
+ * When the day actually pulls out of wherever it started — the clock the marker
+ * waits for before it moves an inch.
+ *
+ * 9:00 ({@link DAY_START_MIN}) is only the *default*. A `start_time` on the
+ * first stop the day drives to re-anchors the whole day, in either direction:
+ * a 1:00 PM check-in two hours up the coast means we're still at last night's
+ * hotel until 10:52, and a 7:30 AM tour six minutes away means we're gone by
+ * 7:24. The Days card already shows exactly that ("Leave by …" = the first
+ * arrival minus the morning drive), so the marker derives it the same way —
+ * otherwise the map has us thirty miles up the road while the itinerary is
+ * still telling us not to leave yet.
+ *
+ * Day one is the exception: its leg begins at the origin stop itself rather
+ * than at a previous night's stay, so the origin's own time *is* the departure.
+ */
+function departMinFor(
+  dayIdx: number,
+  leg: JourneyLeg,
+  first: Stop | undefined,
+  schedule: Map<string, StopSchedule>,
+): number {
+  if (dayIdx === 0) {
+    return (first && schedule.get(first.id)?.departMin) ?? DAY_START_MIN;
+  }
+  // anchors[1] is the first stop the day drives to; anchors[0] is where we woke up
+  const morning = leg.anchors[1];
+  const arrival = morning ? schedule.get(morning.stopId)?.arrivalMin : undefined;
+  return arrival != null ? arrival - morning.driveS / 60 : DAY_START_MIN;
+}
+
+/**
  * Distance along the timeline for the real clock, honoring the trip schedule:
  * before departure day → 0 (parked at the origin); after the final day → the
  * finish. On a travel day the marker follows the day's stops in order — driving
  * between them on each segment's own clock and *sitting still* for the length
  * of each planned stay — and rests at either end outside those hours. Mirrors
- * schedule.ts: day one leaves from the origin's own departure, later days from
- * the 9:00 default.
+ * schedule.ts, including the day's real departure (see {@link departMinFor}):
+ * the marker doesn't leave last night's stay until the itinerary says to.
  *
  * Walking the stops (rather than sweeping the day's whole distance between the
  * morning departure and the last arrival) is what keeps the marker honest as
@@ -334,10 +374,8 @@ export function liveDistance(
     .sort(bySeq);
   const first = dayStops[0];
   const last = dayStops[dayStops.length - 1];
-  // day one departs from the origin's own clock; later days from 9:00
-  const depart =
-    dayIdx === 0 && first ? schedule.get(first.id)?.departMin ?? DAY_START_MIN : DAY_START_MIN;
   const nowMin = now.getHours() * 60 + now.getMinutes();
+  const depart = departMinFor(dayIdx, leg, first, schedule);
 
   // Preferred path: hop stop to stop on the schedule's own times.
   if (leg.anchors.length >= 2) {
