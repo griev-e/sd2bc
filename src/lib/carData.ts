@@ -1,24 +1,32 @@
 /**
- * 2026 model-year car catalog for the "$$$ Cars" game — make → model → trim →
- * base MSRP (USD, destination excluded).
+ * Car catalog for the "$$$ Cars" game — make → model → trim → base MSRP (USD,
+ * destination excluded). Two tables:
+ *
+ *  - `CAR_CATALOG`, the current (CATALOG_YEAR) lineup.
+ *  - `LEGACY_CATALOG`, past-generation trims tagged with the model years they
+ *    were sold. Most of what rolls past on I-5 is not a new car, and the trim
+ *    names that make a sighting worth logging are generation-specific: an
+ *    AMG GT R is not an AMG GT 63, a C5 Z06 is not a C8 Z06. Without the year
+ *    ranges the picker could only ever offer this year's trim names, so
+ *    anything older had to be free-typed and AI-priced.
  *
  * Why this is hand-curated data and not an API call: there is no free, keyless
- * MSRP service. NHTSA's vPIC API is keyless and lists 2026 makes and models,
- * but carries no pricing and no trims; every real pricing feed (Edmunds,
+ * MSRP service. NHTSA's vPIC API is keyless and lists makes and models, but
+ * carries no pricing and no trims; every real pricing feed (Edmunds,
  * MarketCheck, CarsXE, KBB) is key-gated and paid. So the common path is this
  * offline table — instant, free, works on a dead-zone stretch of Highway 1 —
- * and anything it doesn't cover (an older model year, an off-catalog car)
- * falls through to the cached Haiku lookup in `api/car-price`.
+ * and anything it doesn't cover falls through to the cached Haiku lookup in
+ * `api/car-price`.
  *
- * These are approximate base MSRPs for the 2026 model year, good enough to
- * rank a roadside sighting; they are not a quote. Trims are the notable ones,
- * not every configuration — the goal is "how fancy was that thing", not a
- * dealer order sheet.
+ * The numbers are approximate base MSRPs *as sold that year* (not adjusted for
+ * inflation, not a used-market value), good enough to rank a roadside
+ * sighting. Trims are the notable ones, not every configuration — the goal is
+ * "how fancy was that thing", not a dealer order sheet.
  */
 
 export interface CarTrim {
   name: string;
-  /** Base MSRP in USD for the 2026 model year, destination excluded. */
+  /** Base MSRP in USD, destination excluded. */
   msrp: number;
 }
 
@@ -32,13 +40,31 @@ export interface CarMake {
   models: CarModel[];
 }
 
-/** The model year every MSRP in this table refers to. */
+/** A trim from a past generation, with the model years it was sold. */
+export interface LegacyTrim extends CarTrim {
+  /** First model year sold, inclusive. */
+  from: number;
+  /** Last model year sold, inclusive. */
+  to: number;
+}
+
+export interface LegacyModel {
+  name: string;
+  trims: LegacyTrim[];
+}
+
+export interface LegacyMake {
+  name: string;
+  models: LegacyModel[];
+}
+
+/** The model year `CAR_CATALOG` prices. */
 export const CATALOG_YEAR = 2026;
 
 /**
- * Selectable model years. The catalog prices only CATALOG_YEAR; picking any
- * other year routes the lookup to the AI fallback, which is asked for that
- * year's original MSRP.
+ * Oldest selectable model year. The legacy table starts here too — older than
+ * this and a sighting is a classic, which the AI lookup can price better than
+ * a table of "when new" prices can.
  */
 export const MIN_YEAR = 1990;
 
@@ -311,6 +337,7 @@ const RAW: Record<string, [string, [string, number][]][]> = {
   ],
   "Mercedes-Benz": [
     ["CLA", [["250+", 52_000], ["350 4MATIC", 60_000]]],
+    ["CLE", [["300 4MATIC Coupe", 63_000], ["450 4MATIC Coupe", 73_000], ["AMG CLE 53 Coupe", 84_000], ["AMG CLE 53 Cabriolet", 92_000]]],
     ["C-Class", [["C 300", 50_000], ["AMG C 43", 63_000], ["AMG C 63 S E Performance", 87_000]]],
     ["E-Class", [["E 350 4MATIC", 66_000], ["E 450 4MATIC", 74_000], ["AMG E 53", 92_000]]],
     ["S-Class", [["S 500 4MATIC", 122_000], ["S 580 4MATIC", 136_000], ["AMG S 63 E Performance", 190_000]]],
@@ -321,7 +348,7 @@ const RAW: Record<string, [string, [string, number][]][]> = {
     ["GLS", [["450 4MATIC", 89_000], ["580 4MATIC", 108_000], ["AMG GLS 63", 145_000]]],
     ["G-Class", [["G 550", 152_000], ["AMG G 63", 187_000], ["G 580 with EQ", 165_000]]],
     ["SL", [["AMG SL 43", 112_000], ["AMG SL 55", 140_000], ["AMG SL 63", 165_000]]],
-    ["AMG GT", [["55 Coupe", 138_000], ["63 Coupe", 178_000]]],
+    ["AMG GT", [["GT 43 Coupe", 103_000], ["GT 55 Coupe", 138_000], ["GT 63 Coupe", 180_000], ["GT 63 PRO Coupe", 202_000]]],
     ["EQE", [["350+ Sedan", 76_000], ["500 4MATIC SUV", 92_000], ["AMG EQE SUV", 112_000]]],
     ["EQS", [["450+ Sedan", 105_000], ["580 4MATIC SUV", 128_000], ["AMG EQS", 148_000]]],
     ["Maybach S-Class", [["S 580", 200_000], ["S 680", 240_000]]],
@@ -449,6 +476,535 @@ export const CAR_CATALOG: CarMake[] = Object.entries(RAW)
         name: model,
         trims: trims
           .map(([name, msrp]) => ({ name, msrp }))
+          .sort((a, b) => a.msrp - b.msrp),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+/**
+ * Past-generation trims: [model, [trim, msrp-when-new, firstYear, lastYear][]][]
+ * keyed by make. Model names that also exist in `RAW` (Mustang, Corvette,
+ * C-Class…) add era-specific trims to the same nameplate; names that don't
+ * (Viper, S2000, Camaro…) are nameplates that have left the lineup and only
+ * appear once an older year is picked.
+ *
+ * Ranges are US model years and are clamped at MIN_YEAR — a nameplate older
+ * than that (a 1988 Fox-body Mustang) is written as starting in 1990, since
+ * the year picker can't go further back anyway.
+ */
+const LEGACY_RAW: Record<string, [string, [string, number, number, number][]][]> = {
+  Acura: [
+    ["NSX", [["NSX", 89_000, 1991, 2005], ["NSX-T", 95_000, 1995, 2005], ["Coupe", 157_000, 2017, 2022], ["Type S", 171_000, 2022, 2022]]],
+    ["Integra", [["GS-R", 20_000, 1994, 2001], ["Type R", 25_000, 1997, 2001]]],
+    ["RSX", [["Base", 20_000, 2002, 2006], ["Type-S", 24_000, 2002, 2006]]],
+    ["Legend", [["L", 35_000, 1990, 1995]]],
+    ["TL", [["Base", 33_000, 1996, 2014], ["Type-S", 39_000, 2002, 2008]]],
+    ["TSX", [["Base", 28_000, 2004, 2014], ["V6", 35_000, 2010, 2014]]],
+    ["RL", [["Base", 47_000, 1996, 2012]]],
+    ["RLX", [["Base", 55_000, 2014, 2020], ["Sport Hybrid", 65_000, 2014, 2020]]],
+    ["ILX", [["Base", 28_000, 2013, 2022]]],
+  ],
+  "Alfa Romeo": [
+    ["4C", [["Coupe", 55_000, 2015, 2020], ["Spider", 66_000, 2015, 2020]]],
+    ["8C Competizione", [["Base", 265_000, 2008, 2009]]],
+  ],
+  "Aston Martin": [
+    ["V8 Vantage", [["Coupe", 110_000, 2006, 2017], ["V12 Vantage S", 185_000, 2015, 2017]]],
+    ["DB9", [["Coupe", 155_000, 2005, 2016]]],
+    ["DB11", [["V8", 199_000, 2018, 2023], ["V12", 216_000, 2017, 2021]]],
+    ["DBS Superleggera", [["Coupe", 305_000, 2019, 2023]]],
+    ["Rapide", [["S", 205_000, 2011, 2020]]],
+    ["One-77", [["Base", 1_400_000, 2010, 2012]]],
+    ["Valkyrie", [["Base", 3_000_000, 2022, 2024]]],
+  ],
+  Audi: [
+    ["R8", [["4.2 V8", 114_000, 2008, 2015], ["5.2 V10", 148_000, 2009, 2023], ["V10 Plus", 189_000, 2014, 2019], ["V10 Performance", 198_000, 2020, 2023]]],
+    ["TT", [["2.0T", 43_000, 2000, 2023], ["TTS", 53_000, 2009, 2023], ["TT RS", 67_000, 2012, 2022]]],
+    ["A4", [["Premium", 40_000, 1996, 2024], ["S4", 53_000, 1998, 2024], ["RS 4", 66_000, 2007, 2008]]],
+    ["RS 5", [["Base", 75_000, 2013, 2024]]],
+    ["RS 6 Avant", [["Base", 110_000, 2003, 2024]]],
+    ["allroad", [["Base", 46_000, 2001, 2024]]],
+    ["S8", [["Base", 115_000, 2001, 2021]]],
+  ],
+  Bentley: [
+    ["Arnage", [["Base", 216_000, 1999, 2009]]],
+    ["Azure", [["Base", 350_000, 2007, 2010]]],
+    ["Mulsanne", [["Base", 300_000, 2011, 2020], ["Speed", 340_000, 2015, 2020]]],
+  ],
+  BMW: [
+    ["3 Series", [["325i", 32_000, 1992, 2006], ["328i", 38_000, 1996, 2018], ["335i", 41_000, 2007, 2013]]],
+    ["M3", [["E36", 36_000, 1995, 1999], ["E46", 46_000, 2001, 2006], ["E92", 56_000, 2008, 2013], ["F80", 62_000, 2015, 2018]]],
+    ["M5", [["E39", 70_000, 2000, 2003], ["E60", 82_000, 2006, 2010], ["F10", 90_000, 2013, 2016], ["F90", 103_000, 2018, 2023], ["CS", 142_000, 2022, 2022]]],
+    ["M6", [["Coupe", 100_000, 2006, 2019]]],
+    ["1 Series", [["128i", 30_000, 2008, 2013], ["135i", 36_000, 2008, 2013]]],
+    ["1 Series M Coupe", [["Base", 47_000, 2011, 2011]]],
+    ["6 Series", [["650i", 85_000, 2004, 2019]]],
+    ["Z3", [["2.8", 36_000, 1997, 2002], ["M Coupe", 42_000, 1999, 2002]]],
+    ["Z8", [["Base", 128_000, 2000, 2003]]],
+    ["i8", [["Coupe", 148_000, 2014, 2020]]],
+    ["X5 M", [["Base", 99_000, 2010, 2023]]],
+    ["X6 M", [["Base", 103_000, 2010, 2023]]],
+  ],
+  Buick: [
+    ["Roadmaster", [["Estate Wagon", 25_000, 1991, 1996]]],
+    ["Riviera", [["Supercharged", 30_000, 1990, 1999]]],
+    ["Park Avenue", [["Ultra", 36_000, 1991, 2005]]],
+    ["Regal", [["GS", 36_000, 1990, 2020]]],
+    ["LaCrosse", [["Base", 33_000, 2005, 2019]]],
+    ["Cascada", [["Premium", 33_000, 2016, 2019]]],
+    ["Encore", [["Preferred", 24_000, 2013, 2022]]],
+  ],
+  Cadillac: [
+    ["DeVille", [["Base", 40_000, 1990, 2005]]],
+    ["Eldorado", [["Touring Coupe", 40_000, 1990, 2002]]],
+    ["Seville", [["STS", 46_000, 1992, 2004]]],
+    ["Allanté", [["Base", 60_000, 1990, 1993]]],
+    ["CTS", [["Base", 38_000, 2003, 2019], ["CTS-V", 70_000, 2004, 2019], ["CTS-V Wagon", 64_000, 2011, 2014]]],
+    ["ATS", [["Base", 35_000, 2013, 2019], ["ATS-V", 63_000, 2016, 2019]]],
+    ["CT6", [["Luxury", 55_000, 2016, 2020], ["CT6-V", 90_000, 2019, 2020]]],
+    ["XLR", [["Base", 76_000, 2004, 2009], ["XLR-V", 100_000, 2006, 2009]]],
+    ["SRX", [["Luxury", 40_000, 2004, 2016]]],
+    ["STS", [["Base", 46_000, 2005, 2011]]],
+    ["Escalade EXT", [["Base", 53_000, 2002, 2013]]],
+    ["ELR", [["Base", 76_000, 2014, 2016]]],
+  ],
+  Chevrolet: [
+    ["Corvette", [["C4 Coupe", 33_000, 1990, 1996], ["ZR-1", 65_000, 1990, 1995], ["C5 Coupe", 38_000, 1997, 2004], ["C5 Z06", 48_000, 2001, 2004], ["C6 Coupe", 45_000, 2005, 2013], ["C6 Z06", 70_000, 2006, 2013], ["C6 ZR1", 106_000, 2009, 2013], ["C7 Stingray", 55_000, 2014, 2019], ["C7 Z06", 80_000, 2015, 2019], ["C7 ZR1", 120_000, 2019, 2019]]],
+    ["Camaro", [["LS", 26_000, 2010, 2024], ["Z28 (4th gen)", 22_000, 1993, 2002], ["SS", 38_000, 2010, 2024], ["1LE", 45_000, 2017, 2024], ["ZL1", 65_000, 2012, 2024], ["Z/28", 75_000, 2014, 2015]]],
+    ["Impala", [["LT", 30_000, 2000, 2020], ["SS", 38_000, 2006, 2009]]],
+    ["Malibu", [["LS", 24_000, 1997, 2025]]],
+    ["Cruze", [["LS", 18_000, 2011, 2019]]],
+    ["Sonic", [["LT", 16_000, 2012, 2020]]],
+    ["Cobalt", [["SS", 23_000, 2005, 2010]]],
+    ["HHR", [["SS", 24_000, 2006, 2011]]],
+    ["Monte Carlo", [["SS", 27_000, 1995, 2007]]],
+    ["Caprice", [["Classic", 20_000, 1990, 1996]]],
+    ["SS", [["Base", 46_000, 2014, 2017]]],
+    ["SSR", [["Base", 42_000, 2003, 2006]]],
+    ["Avalanche", [["LS", 38_000, 2002, 2013]]],
+    ["Volt", [["Premier", 40_000, 2011, 2019]]],
+    ["Bolt EV", [["LT", 37_000, 2017, 2023]]],
+    ["Astro", [["Base", 18_000, 1990, 2005]]],
+    ["Trailblazer", [["LS (SUV)", 27_000, 2002, 2009], ["SS", 38_000, 2006, 2009]]],
+  ],
+  Chrysler: [
+    ["300", [["Touring", 28_000, 2005, 2023], ["300C", 40_000, 2005, 2023], ["SRT8", 48_000, 2006, 2014]]],
+    ["PT Cruiser", [["Base", 18_000, 2001, 2010], ["GT Turbo", 24_000, 2003, 2010]]],
+    ["Town & Country", [["LX", 30_000, 1990, 2016]]],
+    ["Sebring", [["Convertible", 22_000, 1995, 2010]]],
+    ["Crossfire", [["Base", 34_000, 2004, 2008], ["SRT-6", 45_000, 2005, 2006]]],
+  ],
+  Dodge: [
+    ["Viper", [["RT/10", 55_000, 1992, 2002], ["GTS", 70_000, 1996, 2002], ["SRT-10", 82_000, 2003, 2010], ["Coupe", 100_000, 2013, 2017], ["ACR", 118_000, 2008, 2017]]],
+    ["Challenger", [["SXT", 30_000, 2008, 2023], ["R/T", 40_000, 2008, 2023], ["SRT8", 45_000, 2008, 2016], ["Scat Pack", 46_000, 2015, 2023], ["SRT Hellcat", 65_000, 2015, 2023], ["SRT Demon", 85_000, 2018, 2018], ["SRT Demon 170", 100_000, 2023, 2023]]],
+    ["Charger", [["SE", 27_000, 2006, 2023], ["R/T", 38_000, 2006, 2023], ["SRT8", 48_000, 2006, 2014], ["Scat Pack", 46_000, 2015, 2023], ["SRT Hellcat", 70_000, 2015, 2023], ["Hellcat Redeye", 82_000, 2019, 2023]]],
+    ["Magnum", [["R/T", 32_000, 2005, 2008], ["SRT8", 38_000, 2006, 2008]]],
+    ["Neon", [["Highline", 12_000, 1995, 2005], ["SRT-4", 20_000, 2003, 2005]]],
+    ["Dart", [["SE", 17_000, 2013, 2016]]],
+    ["Caliber", [["SRT4", 23_000, 2008, 2009]]],
+    ["Journey", [["SE", 22_000, 2009, 2020]]],
+    ["Stealth", [["R/T Turbo", 32_000, 1991, 1996]]],
+    ["Grand Caravan", [["SE", 26_000, 1990, 2020]]],
+    ["Ram 1500", [["ST", 20_000, 1990, 2009], ["SRT-10", 46_000, 2004, 2006]]],
+    ["Dakota", [["SLT", 20_000, 1990, 2011]]],
+  ],
+  Ferrari: [
+    ["348", [["ts", 105_000, 1990, 1995]]],
+    ["F355", [["Berlinetta", 130_000, 1995, 1999]]],
+    ["360", [["Modena", 138_000, 1999, 2005], ["Challenge Stradale", 190_000, 2004, 2005]]],
+    ["F430", [["Berlinetta", 168_000, 2005, 2009], ["Scuderia", 240_000, 2008, 2009]]],
+    ["458", [["Italia", 230_000, 2010, 2015], ["Speciale", 290_000, 2014, 2015]]],
+    ["488", [["GTB", 250_000, 2016, 2019], ["Pista", 330_000, 2019, 2020]]],
+    ["F8", [["Tributo", 280_000, 2020, 2022]]],
+    ["550 Maranello", [["Base", 200_000, 1997, 2002]]],
+    ["575M Maranello", [["Base", 220_000, 2002, 2006]]],
+    ["599", [["GTB Fiorano", 300_000, 2007, 2012]]],
+    ["F12", [["Berlinetta", 320_000, 2013, 2017]]],
+    ["812", [["Superfast", 340_000, 2018, 2023], ["Competizione", 600_000, 2022, 2023]]],
+    ["California", [["Base", 195_000, 2009, 2017]]],
+    ["Portofino", [["Base", 215_000, 2018, 2023]]],
+    ["FF", [["Base", 300_000, 2012, 2016]]],
+    ["GTC4Lusso", [["Base", 300_000, 2017, 2020]]],
+    ["Testarossa", [["512 TR", 195_000, 1990, 1996]]],
+    ["F50", [["Base", 480_000, 1996, 1997]]],
+    ["Enzo", [["Base", 660_000, 2003, 2004]]],
+    ["LaFerrari", [["Base", 1_400_000, 2014, 2016]]],
+    ["Monza", [["SP2", 1_800_000, 2019, 2021]]],
+  ],
+  Ford: [
+    ["Mustang", [["LX 5.0", 14_000, 1990, 1993], ["GT", 22_000, 1994, 2014], ["SVT Cobra", 28_000, 1993, 2004], ["Mach 1", 30_000, 2003, 2004], ["Shelby GT500", 45_000, 2007, 2014], ["Boss 302", 42_000, 2012, 2013], ["Bullitt", 47_000, 2019, 2020], ["Shelby GT350", 55_000, 2016, 2020], ["Mach 1 (S550)", 52_000, 2021, 2023], ["Shelby GT500 (S550)", 73_000, 2020, 2022]]],
+    ["GT", [["Base", 150_000, 2005, 2006], ["Carbon Series", 450_000, 2017, 2022]]],
+    ["Focus", [["S", 17_000, 2000, 2018], ["ST", 25_000, 2013, 2018], ["RS", 36_000, 2016, 2018]]],
+    ["Fiesta", [["S", 14_000, 2011, 2019], ["ST", 22_000, 2014, 2019]]],
+    ["Fusion", [["S", 23_000, 2006, 2020], ["Sport", 34_000, 2017, 2020]]],
+    ["Taurus", [["SE", 25_000, 1990, 2019], ["SHO", 40_000, 2010, 2019]]],
+    ["Crown Victoria", [["LX", 26_000, 1992, 2011]]],
+    ["Edge", [["SE", 32_000, 2007, 2024], ["ST", 43_000, 2019, 2024]]],
+    ["Flex", [["SE", 30_000, 2009, 2019]]],
+    ["EcoSport", [["S", 21_000, 2018, 2022]]],
+    ["Excursion", [["XLT", 34_000, 2000, 2005]]],
+    ["Thunderbird", [["Deluxe", 36_000, 2002, 2005]]],
+    ["F-150 SVT Lightning", [["Base", 32_000, 1993, 2004]]],
+    ["Ranger", [["XL", 15_000, 1990, 2011]]],
+    ["Bronco", [["XLT (full-size)", 25_000, 1990, 1996]]],
+    ["Five Hundred", [["SEL", 26_000, 2005, 2007]]],
+    ["Probe", [["GT", 17_000, 1990, 1997]]],
+  ],
+  Genesis: [["G70", [["3.3T Sport", 50_000, 2019, 2024]]]],
+  GMC: [
+    ["Envoy", [["SLE", 30_000, 1998, 2009], ["Denali", 40_000, 2003, 2009]]],
+    ["Jimmy", [["SLS", 25_000, 1990, 2001]]],
+    ["Typhoon", [["Base", 30_000, 1992, 1993]]],
+    ["Syclone", [["Base", 26_000, 1991, 1991]]],
+    ["Safari", [["SLE", 18_000, 1990, 2005]]],
+    ["Savana", [["Cargo", 35_000, 1996, 2024]]],
+  ],
+  Honda: [
+    ["S2000", [["Base", 32_000, 2000, 2009], ["CR", 36_000, 2008, 2009]]],
+    ["Prelude", [["Si", 24_000, 1990, 2001], ["Type SH", 26_000, 1997, 2001]]],
+    ["Civic", [["DX", 12_000, 1990, 2005], ["Si", 20_000, 1999, 2015], ["Type R (FK8)", 35_000, 2017, 2021]]],
+    ["Accord", [["DX", 15_000, 1990, 2007], ["V6 Coupe", 26_000, 1998, 2017]]],
+    ["CRX", [["Si", 12_000, 1990, 1991]]],
+    ["del Sol", [["Si", 17_000, 1993, 1997]]],
+    ["Insight", [["Base", 20_000, 2000, 2022]]],
+    ["Fit", [["Sport", 16_000, 2007, 2020]]],
+    ["Element", [["EX", 20_000, 2003, 2011]]],
+    ["CR-Z", [["EX", 22_000, 2011, 2016]]],
+    ["Clarity", [["Plug-In Hybrid", 34_000, 2018, 2021]]],
+  ],
+  Hummer: [
+    ["H1", [["Wagon", 105_000, 1992, 2006], ["Alpha", 140_000, 2006, 2006]]],
+    ["H2", [["SUV", 50_000, 2003, 2009], ["SUT", 53_000, 2005, 2009]]],
+    ["H3", [["Base", 30_000, 2006, 2010], ["Alpha", 38_000, 2008, 2010]]],
+  ],
+  Hyundai: [
+    ["Genesis", [["3.8", 35_000, 2009, 2016], ["5.0 R-Spec", 47_000, 2012, 2016]]],
+    ["Genesis Coupe", [["2.0T", 25_000, 2010, 2016], ["3.8 Track", 32_000, 2010, 2016]]],
+    ["Veloster", [["Base", 19_000, 2012, 2022], ["N", 30_000, 2019, 2022]]],
+    ["Tiburon", [["GT", 19_000, 1997, 2008]]],
+    ["Equus", [["Signature", 60_000, 2011, 2016]]],
+    ["Azera", [["Limited", 33_000, 2006, 2017]]],
+    ["Accent", [["SE", 15_000, 1995, 2022]]],
+    ["Ioniq", [["Hybrid", 23_000, 2017, 2022]]],
+    ["Nexo", [["Blue", 59_000, 2019, 2023]]],
+  ],
+  Infiniti: [
+    ["G35", [["Coupe", 32_000, 2003, 2007]]],
+    ["G37", [["Journey", 36_000, 2008, 2013], ["IPL", 46_000, 2011, 2013]]],
+    ["Q50", [["3.0t", 37_000, 2014, 2024], ["Red Sport 400", 51_000, 2016, 2024]]],
+    ["Q60", [["3.0t", 41_000, 2017, 2022], ["Red Sport 400", 56_000, 2017, 2022]]],
+    ["Q45", [["Base", 45_000, 1990, 2006]]],
+    ["FX", [["FX35", 35_000, 2003, 2013], ["FX50", 58_000, 2009, 2013]]],
+    ["QX56", [["Base", 53_000, 2004, 2013]]],
+    ["Q70", [["3.7", 51_000, 2014, 2019]]],
+  ],
+  Isuzu: [
+    ["Trooper", [["S", 25_000, 1990, 2002]]],
+    ["Rodeo", [["S", 20_000, 1991, 2004]]],
+    ["VehiCROSS", [["Base", 29_000, 1999, 2001]]],
+  ],
+  Jeep: [
+    ["Cherokee", [["Sport (XJ)", 18_000, 1990, 2001]]],
+    ["Grand Cherokee", [["Laredo", 26_000, 1993, 2021], ["SRT8", 45_000, 2006, 2021], ["Trackhawk", 87_000, 2018, 2021]]],
+    ["Wrangler", [["Sport (TJ/JK)", 15_000, 1990, 2018], ["Rubicon (TJ/JK)", 28_000, 2003, 2018]]],
+    ["Liberty", [["Sport", 21_000, 2002, 2012]]],
+    ["Commander", [["Base", 28_000, 2006, 2010]]],
+    ["Patriot", [["Sport", 16_000, 2007, 2017]]],
+    ["Renegade", [["Sport", 20_000, 2015, 2023]]],
+  ],
+  Kia: [
+    ["Stinger", [["GT-Line", 36_000, 2018, 2023], ["GT2", 53_000, 2018, 2023]]],
+    ["Optima", [["LX", 22_000, 2001, 2020]]],
+    ["Forte", [["LX", 19_000, 2010, 2024]]],
+    ["Rio", [["LX", 15_000, 2001, 2023]]],
+    ["Sedona", [["LX", 27_000, 2002, 2021]]],
+    ["Niro", [["LX", 25_000, 2017, 2025]]],
+    ["Cadenza", [["Premium", 33_000, 2014, 2020]]],
+    ["K900", [["Luxury", 60_000, 2015, 2020]]],
+  ],
+  Lamborghini: [
+    ["Diablo", [["VT", 240_000, 1991, 2001]]],
+    ["Murciélago", [["Coupe", 280_000, 2002, 2010], ["LP670-4 SV", 450_000, 2010, 2010]]],
+    ["Gallardo", [["Coupe", 180_000, 2004, 2014], ["LP570-4 Superleggera", 240_000, 2011, 2014]]],
+    ["Huracán", [["LP610-4", 240_000, 2015, 2024], ["Performante", 275_000, 2018, 2019], ["Sterrato", 275_000, 2023, 2024], ["STO", 330_000, 2021, 2024]]],
+    ["Aventador", [["LP700-4", 390_000, 2012, 2022], ["SV", 495_000, 2016, 2017], ["SVJ", 520_000, 2019, 2022]]],
+    ["Urus", [["Base", 200_000, 2019, 2024]]],
+    ["Reventón", [["Base", 1_500_000, 2008, 2009]]],
+    ["Countach LPI 800-4", [["Base", 2_600_000, 2022, 2022]]],
+    ["Sián", [["FKP 37", 3_600_000, 2020, 2021]]],
+    ["Veneno", [["Base", 4_500_000, 2014, 2014]]],
+  ],
+  "Land Rover": [
+    ["Discovery", [["Series II", 34_000, 1999, 2004], ["LR3", 40_000, 2005, 2009], ["LR4", 49_000, 2010, 2016]]],
+    ["Range Rover", [["HSE", 65_000, 1995, 2021], ["Supercharged", 95_000, 2006, 2021], ["SVAutobiography", 170_000, 2016, 2021]]],
+    ["Defender", [["90 (NAS)", 30_000, 1994, 1997]]],
+    ["Freelander", [["SE", 26_000, 2002, 2005]]],
+  ],
+  Lexus: [
+    ["LFA", [["Base", 375_000, 2012, 2013]]],
+    ["SC", [["SC 300", 40_000, 1992, 2000], ["SC 430", 62_000, 2002, 2010]]],
+    ["GS", [["GS 300", 38_000, 1993, 2020], ["GS 350 F Sport", 52_000, 2013, 2020], ["GS F", 85_000, 2016, 2020]]],
+    ["IS", [["IS 300", 31_000, 2001, 2005], ["IS F", 61_000, 2008, 2014]]],
+    ["LS", [["LS 400", 51_000, 1990, 2000], ["LS 430", 55_000, 2001, 2006], ["LS 460", 62_000, 2007, 2017]]],
+    ["RC", [["RC 350", 45_000, 2015, 2024], ["RC F", 65_000, 2015, 2024], ["RC F Track Edition", 97_000, 2020, 2021]]],
+    ["CT", [["200h", 32_000, 2011, 2017]]],
+    ["GX", [["470", 45_000, 2003, 2009], ["460", 53_000, 2010, 2023]]],
+    ["LX", [["450", 47_000, 1996, 2007], ["570", 78_000, 2008, 2021]]],
+    ["RX", [["300", 32_000, 1999, 2022]]],
+  ],
+  Lincoln: [
+    ["Continental", [["Base", 45_000, 1990, 2020]]],
+    ["Town Car", [["Signature", 40_000, 1990, 2011]]],
+    ["Mark VIII", [["LSC", 37_000, 1993, 1998]]],
+    ["Blackwood", [["Base", 52_000, 2002, 2002]]],
+    ["Mark LT", [["Base", 40_000, 2006, 2008]]],
+    ["MKZ", [["Base", 36_000, 2007, 2020]]],
+    ["MKS", [["Base", 42_000, 2009, 2016]]],
+    ["MKX", [["Base", 39_000, 2007, 2018]]],
+    ["MKT", [["Base", 45_000, 2010, 2019]]],
+  ],
+  Lotus: [
+    ["Esprit", [["S4", 70_000, 1990, 2004]]],
+    ["Elise", [["Base", 40_000, 2005, 2011]]],
+    ["Exige", [["S", 60_000, 2006, 2011]]],
+    ["Evora", [["Base", 64_000, 2010, 2021], ["GT", 96_000, 2020, 2021]]],
+    ["Evija", [["Base", 2_300_000, 2022, 2024]]],
+  ],
+  Maserati: [
+    ["Coupe", [["Cambiocorsa", 85_000, 2002, 2007]]],
+    ["Quattroporte", [["Base", 100_000, 2005, 2023], ["Trofeo", 145_000, 2021, 2023]]],
+    ["Ghibli", [["Base", 72_000, 2014, 2023], ["Trofeo", 115_000, 2021, 2023]]],
+    ["GranTurismo", [["Base", 118_000, 2008, 2019], ["MC", 150_000, 2016, 2019]]],
+    ["Levante", [["Base", 76_000, 2017, 2023], ["Trofeo", 152_000, 2019, 2023]]],
+    ["MC12", [["Base", 800_000, 2005, 2005]]],
+  ],
+  Mazda: [
+    ["RX-7", [["Base", 32_000, 1990, 1995], ["R1", 37_000, 1993, 1995]]],
+    ["RX-8", [["Base", 27_000, 2004, 2011]]],
+    ["MX-5 Miata", [["Base (NA/NB)", 14_000, 1990, 2005], ["Mazdaspeed", 26_000, 2004, 2005], ["Club (NC)", 26_000, 2006, 2015]]],
+    ["Mazdaspeed3", [["Base", 24_000, 2007, 2013]]],
+    ["Mazdaspeed6", [["Base", 28_000, 2006, 2007]]],
+    ["Mazda6", [["i Sport", 22_000, 2003, 2021]]],
+    ["CX-3", [["Sport", 21_000, 2016, 2021]]],
+    ["CX-7", [["Sport", 24_000, 2007, 2012]]],
+    ["CX-9", [["Sport", 33_000, 2007, 2023]]],
+    ["Protegé", [["ES", 16_000, 1990, 2003]]],
+    ["Millenia", [["S", 34_000, 1995, 2002]]],
+  ],
+  McLaren: [
+    ["F1", [["Base", 815_000, 1994, 1998]]],
+    ["MP4-12C", [["Coupe", 231_000, 2012, 2014]]],
+    ["650S", [["Coupe", 265_000, 2015, 2016]]],
+    ["675LT", [["Coupe", 350_000, 2016, 2017]]],
+    ["570S", [["Coupe", 188_000, 2016, 2021]]],
+    ["600LT", [["Coupe", 240_000, 2019, 2020]]],
+    ["720S", [["Coupe", 288_000, 2018, 2022]]],
+    ["765LT", [["Coupe", 358_000, 2021, 2022]]],
+    ["GT", [["Base", 210_000, 2020, 2023]]],
+    ["P1", [["Base", 1_150_000, 2014, 2015]]],
+    ["Senna", [["Base", 1_000_000, 2019, 2020]]],
+    ["Elva", [["Base", 1_700_000, 2021, 2022]]],
+    ["Speedtail", [["Base", 2_250_000, 2020, 2021]]],
+  ],
+  "Mercedes-Benz": [
+    // The two-door AMG GT (C190). The trim *is* the letter — GT, GT S, GT C,
+    // GT R — and none of those names exist on the current car, whose trims are
+    // numbers (43/55/63). Missing them is what sent this table into existence.
+    ["AMG GT", [["GT", 112_000, 2016, 2019], ["GT Roadster", 126_000, 2018, 2021], ["GT S", 132_000, 2016, 2021], ["GT C", 145_000, 2018, 2021], ["GT R", 162_000, 2018, 2021], ["GT R Pro", 200_000, 2020, 2021], ["GT Black Series", 325_000, 2021, 2021]]],
+    ["AMG GT 4-Door", [["GT 43", 89_000, 2020, 2023], ["GT 53", 101_000, 2019, 2023], ["GT 63", 138_000, 2019, 2023], ["GT 63 S", 161_000, 2019, 2023], ["GT 63 S E Performance", 190_000, 2023, 2024]]],
+    ["SLS AMG", [["Coupe", 183_000, 2011, 2014], ["Roadster", 199_000, 2012, 2015], ["Black Series", 275_000, 2014, 2014]]],
+    ["SLR McLaren", [["Coupe", 455_000, 2005, 2009]]],
+    ["C-Class", [["C 230", 30_000, 1997, 2007], ["C 240", 33_000, 2001, 2005], ["C 300", 39_000, 2008, 2023], ["C 350", 43_000, 2006, 2015], ["AMG C 32", 50_000, 2002, 2004], ["AMG C 55", 56_000, 2005, 2006], ["AMG C 63", 60_000, 2008, 2015], ["AMG C 63 S", 76_000, 2016, 2023]]],
+    ["E-Class", [["E 320", 47_000, 1990, 2009], ["E 350", 51_000, 2006, 2023], ["E 500", 58_000, 2003, 2006], ["E 550", 62_000, 2007, 2017], ["AMG E 55", 78_000, 2003, 2006], ["AMG E 63", 88_000, 2007, 2023]]],
+    ["S-Class", [["S 500", 90_000, 1994, 2013], ["S 550", 95_000, 2007, 2020], ["S 600", 140_000, 1994, 2020], ["AMG S 63", 140_000, 2008, 2020], ["AMG S 65", 225_000, 2005, 2019]]],
+    ["SL", [["SL 500", 90_000, 1990, 2012], ["SL 550", 105_000, 2013, 2020], ["AMG SL 55", 116_000, 2003, 2008], ["AMG SL 63", 145_000, 2009, 2020], ["AMG SL 65", 200_000, 2005, 2020]]],
+    ["G-Class", [["G 500", 73_000, 2002, 2008], ["G 550", 105_000, 2009, 2018], ["AMG G 55", 125_000, 2005, 2011], ["AMG G 63", 140_000, 2013, 2018]]],
+    ["CLS", [["CLS 500", 66_000, 2006, 2011], ["CLS 550", 75_000, 2012, 2018], ["CLS 450", 70_000, 2019, 2023], ["AMG CLS 63", 95_000, 2007, 2018]]],
+    ["CLK", [["CLK 320", 45_000, 1998, 2009], ["AMG CLK 55", 68_000, 2001, 2006]]],
+    ["CL-Class", [["CL 550", 111_000, 2007, 2014], ["CL 600", 148_000, 2000, 2014], ["AMG CL 63", 151_000, 2008, 2014]]],
+    ["SLK", [["SLK 230", 40_000, 1998, 2004], ["SLK 350", 46_000, 2005, 2016], ["AMG SLK 55", 68_000, 2005, 2016]]],
+    ["SLC", [["SLC 300", 48_000, 2017, 2020], ["AMG SLC 43", 62_000, 2017, 2020]]],
+    ["ML-Class", [["ML 350", 47_000, 1998, 2015], ["ML 550", 57_000, 2008, 2015], ["AMG ML 63", 96_000, 2007, 2015]]],
+    ["GL-Class", [["GL 450", 60_000, 2007, 2016], ["GL 550", 88_000, 2008, 2016]]],
+    ["GLK", [["GLK 350", 37_000, 2010, 2015]]],
+    ["R-Class", [["R 350", 48_000, 2006, 2012]]],
+    ["Maybach 57", [["Base", 335_000, 2003, 2012]]],
+    ["Maybach 62", [["Base", 385_000, 2003, 2012]]],
+  ],
+  Mercury: [
+    ["Cougar", [["XR7", 17_000, 1990, 2002]]],
+    ["Grand Marquis", [["LS", 27_000, 1990, 2011]]],
+    ["Marauder", [["Base", 34_000, 2003, 2004]]],
+    ["Mountaineer", [["Base", 32_000, 1997, 2010]]],
+    ["Sable", [["GS", 22_000, 1990, 2009]]],
+  ],
+  Mini: [
+    ["Cooper", [["Base (R50/R53)", 17_000, 2002, 2006], ["S (R56)", 23_000, 2007, 2013]]],
+    ["Clubman", [["S", 28_000, 2008, 2024], ["John Cooper Works ALL4", 40_000, 2017, 2024]]],
+    ["Coupe", [["S", 25_000, 2012, 2015]]],
+    ["Paceman", [["S ALL4", 27_000, 2013, 2016]]],
+  ],
+  Mitsubishi: [
+    ["Lancer Evolution", [["VIII", 29_000, 2003, 2015], ["MR", 38_000, 2008, 2015], ["Final Edition", 38_000, 2015, 2015]]],
+    ["Lancer", [["ES", 16_000, 2002, 2017], ["Ralliart", 27_000, 2009, 2015]]],
+    ["3000GT", [["VR-4", 40_000, 1991, 1999]]],
+    ["Eclipse", [["GSX", 25_000, 1990, 2012]]],
+    ["Montero", [["Sport", 30_000, 1990, 2006]]],
+    ["Mirage", [["ES", 14_000, 1990, 2024]]],
+    ["Galant", [["ES", 20_000, 1990, 2012]]],
+    ["Diamante", [["LS", 30_000, 1992, 2004]]],
+    ["i-MiEV", [["ES", 23_000, 2012, 2017]]],
+  ],
+  Nissan: [
+    ["300ZX", [["Twin Turbo", 33_000, 1990, 1996]]],
+    ["350Z", [["Base", 27_000, 2003, 2009], ["NISMO", 38_000, 2007, 2009]]],
+    ["370Z", [["Base", 30_000, 2009, 2020], ["NISMO", 46_000, 2009, 2020]]],
+    ["GT-R", [["Premium", 70_000, 2009, 2024], ["NISMO", 175_000, 2015, 2024]]],
+    ["240SX", [["SE", 17_000, 1990, 1998]]],
+    ["Maxima", [["SE", 25_000, 1990, 2023]]],
+    ["Sentra", [["SE-R Spec V", 20_000, 2002, 2012]]],
+    ["Xterra", [["S", 24_000, 2000, 2015]]],
+    ["Juke", [["S", 19_000, 2011, 2017], ["NISMO RS", 27_000, 2014, 2017]]],
+    ["Cube", [["S", 17_000, 2009, 2014]]],
+    ["Titan", [["S", 37_000, 2004, 2024]]],
+    ["Quest", [["S", 26_000, 1993, 2017]]],
+  ],
+  Oldsmobile: [
+    ["Aurora", [["Base", 32_000, 1995, 2003]]],
+    ["Cutlass Supreme", [["SL", 18_000, 1990, 1997]]],
+    ["Alero", [["GLS", 20_000, 1999, 2004]]],
+    ["Bravada", [["Base", 32_000, 1991, 2004]]],
+    ["Intrigue", [["GLS", 24_000, 1998, 2002]]],
+    ["Eighty-Eight", [["LSS", 25_000, 1990, 1999]]],
+    ["Silhouette", [["GLS", 27_000, 1990, 2004]]],
+  ],
+  Plymouth: [
+    ["Prowler", [["Base", 39_000, 1997, 2002]]],
+    ["Neon", [["Highline", 11_000, 1995, 2001]]],
+    ["Voyager", [["SE", 20_000, 1990, 2000]]],
+    ["Laser", [["RS Turbo", 17_000, 1990, 1994]]],
+    ["Breeze", [["Base", 15_000, 1996, 2000]]],
+  ],
+  Pontiac: [
+    ["Firebird", [["Formula", 22_000, 1990, 2002], ["Trans Am", 25_000, 1990, 2002], ["Trans Am WS6", 30_000, 1996, 2002]]],
+    ["GTO", [["Base", 33_000, 2004, 2006]]],
+    ["G8", [["GT", 30_000, 2008, 2009], ["GXP", 39_000, 2009, 2009]]],
+    ["Solstice", [["Base", 20_000, 2006, 2009], ["GXP", 26_000, 2007, 2009]]],
+    ["Grand Prix", [["GTP", 26_000, 1990, 2008]]],
+    ["Bonneville", [["SSEi", 32_000, 1990, 2005]]],
+    ["Aztek", [["Base", 21_000, 2001, 2005]]],
+    ["Vibe", [["GT", 19_000, 2003, 2010]]],
+  ],
+  Porsche: [
+    ["911", [["964 Carrera", 60_000, 1990, 1994], ["993 Carrera", 65_000, 1995, 1998], ["996 Carrera", 66_000, 1999, 2004], ["996 Turbo", 111_000, 2001, 2005], ["997 Carrera S", 82_000, 2005, 2012], ["997 GT3 RS", 133_000, 2007, 2011], ["991 Carrera", 85_000, 2012, 2019], ["991 GT3", 144_000, 2014, 2019], ["991 Turbo S", 189_000, 2014, 2019], ["991 GT2 RS", 294_000, 2018, 2019], ["992 Carrera", 99_000, 2020, 2024], ["992 GT3 RS", 241_000, 2023, 2024]]],
+    ["Boxster", [["Base", 40_000, 1997, 2016], ["S", 52_000, 2000, 2016], ["Spyder", 82_000, 2011, 2016]]],
+    ["Cayman", [["Base", 50_000, 2006, 2016], ["S", 62_000, 2006, 2016], ["GT4", 85_000, 2016, 2016]]],
+    ["928", [["GTS", 84_000, 1990, 1995]]],
+    ["968", [["Coupe", 40_000, 1992, 1995]]],
+    ["Carrera GT", [["Base", 448_000, 2004, 2006]]],
+    ["918 Spyder", [["Base", 845_000, 2015, 2015]]],
+    ["Cayenne", [["S (955/957)", 56_000, 2003, 2010], ["Turbo S", 146_000, 2006, 2024]]],
+    ["Macan", [["S (95B)", 55_000, 2015, 2024], ["Turbo", 85_000, 2015, 2021]]],
+  ],
+  Saab: [
+    ["900", [["Turbo", 30_000, 1990, 1998]]],
+    ["9-3", [["Aero", 36_000, 1999, 2011], ["Viggen", 38_000, 1999, 2002]]],
+    ["9-5", [["Aero", 45_000, 1999, 2011]]],
+    ["9-2X", [["Aero", 27_000, 2005, 2006]]],
+    ["9-7X", [["Aero", 42_000, 2005, 2009]]],
+  ],
+  Saturn: [
+    ["SL", [["SL2", 12_000, 1991, 2002]]],
+    ["Ion", [["Red Line", 21_000, 2004, 2007]]],
+    ["Vue", [["Red Line", 24_000, 2002, 2010]]],
+    ["Sky", [["Red Line", 26_000, 2007, 2010]]],
+    ["Aura", [["XR", 24_000, 2007, 2009]]],
+    ["Outlook", [["XR", 32_000, 2007, 2010]]],
+  ],
+  Scion: [
+    ["tC", [["Base", 17_000, 2005, 2016]]],
+    ["xB", [["Base", 16_000, 2004, 2015]]],
+    ["FR-S", [["Base", 25_000, 2013, 2016]]],
+    ["iQ", [["Base", 16_000, 2012, 2015]]],
+    ["xD", [["Base", 15_000, 2008, 2014]]],
+  ],
+  Subaru: [
+    ["WRX", [["STI (GD)", 31_000, 2004, 2007], ["STI (GR/GV)", 35_000, 2008, 2014], ["STI (VA)", 37_000, 2015, 2021], ["STI S209", 64_000, 2019, 2019]]],
+    ["Impreza", [["2.5 RS", 20_000, 1998, 2005]]],
+    ["Legacy", [["GT", 30_000, 1990, 2025], ["Spec.B", 35_000, 2006, 2009]]],
+    ["SVX", [["LS", 36_000, 1992, 1997]]],
+    ["Baja", [["Turbo", 24_000, 2003, 2006]]],
+    ["Tribeca", [["Limited", 34_000, 2006, 2014]]],
+    ["Forester", [["XT", 28_000, 1998, 2018]]],
+    ["Outback", [["XT (older)", 30_000, 1996, 2019]]],
+  ],
+  Suzuki: [
+    ["Sidekick", [["JX", 13_000, 1990, 1998]]],
+    ["Grand Vitara", [["Base", 20_000, 1999, 2013]]],
+    ["SX4", [["Sport", 15_000, 2007, 2013]]],
+    ["Kizashi", [["SE", 19_000, 2010, 2013]]],
+    ["Swift", [["GT", 10_000, 1990, 1994]]],
+  ],
+  Tesla: [
+    ["Roadster", [["Sport", 128_000, 2008, 2012]]],
+    ["Model S", [["60", 70_000, 2013, 2019], ["P85D", 105_000, 2015, 2016], ["P100D", 135_000, 2017, 2020]]],
+    ["Model X", [["75D", 83_000, 2016, 2020], ["P100D", 140_000, 2017, 2020]]],
+  ],
+  Toyota: [
+    ["Supra", [["Turbo (Mk4)", 40_000, 1993, 1998]]],
+    ["MR2", [["Turbo", 24_000, 1991, 1995], ["Spyder", 24_000, 2000, 2005]]],
+    ["Celica", [["GT-S", 22_000, 1990, 2005], ["All-Trac Turbo", 26_000, 1990, 1993]]],
+    ["FJ Cruiser", [["Base", 26_000, 2007, 2014]]],
+    ["Land Cruiser", [["FZJ80", 40_000, 1990, 1997], ["100 Series", 55_000, 1998, 2007], ["200 Series", 85_000, 2008, 2021]]],
+    ["Prius", [["Base (older)", 22_000, 2001, 2022], ["Plug-in", 32_000, 2012, 2015]]],
+    ["Avalon", [["XLE", 34_000, 1995, 2022], ["TRD", 44_000, 2020, 2022]]],
+    ["Matrix", [["XRS", 19_000, 2003, 2013]]],
+    ["Yaris", [["LE", 15_000, 2007, 2020]]],
+    ["Echo", [["Base", 12_000, 2000, 2005]]],
+    ["Venza", [["Limited", 35_000, 2009, 2024]]],
+    ["Mirai", [["XLE", 51_000, 2016, 2025]]],
+    ["Sequoia", [["SR5 (older)", 40_000, 2001, 2022]]],
+    ["4Runner", [["SR5 (older)", 30_000, 1990, 2024], ["TRD Pro (5th gen)", 52_000, 2015, 2024]]],
+    ["Tacoma", [["SR5 (older)", 22_000, 1995, 2023], ["TRD Pro (older)", 45_000, 2015, 2023]]],
+  ],
+  Volkswagen: [
+    ["Golf", [["GTI Mk3", 18_000, 1990, 1999], ["GTI Mk5", 23_000, 2006, 2009], ["R32", 33_000, 2004, 2008]]],
+    ["Beetle", [["GLS", 18_000, 1998, 2019], ["Turbo S", 24_000, 2002, 2004]]],
+    ["Passat", [["SE", 26_000, 1990, 2022], ["W8", 38_000, 2002, 2004]]],
+    ["Phaeton", [["W12", 95_000, 2004, 2006]]],
+    ["Touareg", [["V8", 47_000, 2004, 2017]]],
+    ["Eos", [["Komfort", 32_000, 2007, 2016]]],
+    ["CC", [["Sport", 30_000, 2009, 2017]]],
+    ["Corrado", [["SLC", 23_000, 1990, 1994]]],
+    ["Arteon", [["SEL R-Line", 42_000, 2019, 2023]]],
+  ],
+  Volvo: [
+    ["850", [["T-5R", 36_000, 1993, 1997]]],
+    ["S40", [["T5", 27_000, 2000, 2011]]],
+    ["S70", [["T5", 32_000, 1998, 2000]]],
+    ["C30", [["T5 R-Design", 27_000, 2008, 2013]]],
+    ["C70", [["T5", 40_000, 1998, 2013]]],
+    ["S80", [["T6", 45_000, 1999, 2016]]],
+    ["V70", [["R", 40_000, 1998, 2010]]],
+    ["XC70", [["T6", 44_000, 2003, 2016]]],
+    ["V90", [["Cross Country", 56_000, 2017, 2023]]],
+  ],
+};
+
+/**
+ * The past-years catalog, sorted like `CAR_CATALOG` (make → model → cheapest
+ * trim first). Trims stay tagged with their year range; `carPrice.ts` filters
+ * by the selected model year.
+ */
+export const LEGACY_CATALOG: LegacyMake[] = Object.entries(LEGACY_RAW)
+  .map(([make, models]) => ({
+    name: make,
+    models: models
+      .map(([model, trims]) => ({
+        name: model,
+        trims: trims
+          .map(([name, msrp, from, to]) => ({ name, msrp, from, to }))
           .sort((a, b) => a.msrp - b.msrp),
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),

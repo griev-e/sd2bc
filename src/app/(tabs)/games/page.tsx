@@ -17,7 +17,7 @@ const GAMES: { id: GameId; label: string; blurb: string }[] = [
   { id: "plates", label: "Plates", blurb: "License-plate bingo — spot together, rank your favorites" },
   { id: "roadside", label: "I Spy", blurb: "Roadside scavenger hunt" },
   { id: "fastfood", label: "Chains", blurb: "Count your chain's sightings" },
-  { id: "cars", label: "$$$ Cars", blurb: "Priciest spot on record" },
+  { id: "cars", label: "$$$ Cars", blurb: "Build the haul together" },
   { id: "words", label: "Word Rush", blurb: "Taboo, 60 seconds a round" },
 ];
 
