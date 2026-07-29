@@ -104,8 +104,8 @@ src/
 | `shaping.ts` | Insert an invisible via/shaping point on a day's route. |
 | `analysis.ts` | AI trip analyzer client half: `analysisKey()` (cache key = hash of the itinerary + budget knobs) and `buildAnalysisPayload()` (the compact snapshot `/api/analyze` feeds to Claude). |
 | `plateRank.ts` | Beli-style license-plate rating: per-person ranking document (the latest `score` game event with key `ranking:<ownerId>` — writable by either traveler, so the passenger can enter the driver's take), sentiment buckets with fixed score bands, binary-insert duel math, positional 0–10 scores, combined leaderboard. Pure. |
-| `carData.ts` | 2026 model-year car catalog for the `$$$ Cars` game: make → model → trim → base MSRP (~46 makes / 900 trims, economy through hypercar). Hand-curated because no free keyless MSRP feed exists — NHTSA vPIC has 2026 makes/models but no prices or trims. |
-| `carPrice.ts` | `$$$ Cars` domain logic: cascading make/model/trim lookups over the catalog, `catalogMsrp()` (exact hit or null — never a guess), price tiers with doubling point values (`tierOf`, `scoreFor`), `carPriceKey()` cache key, and `parseSighting()` (tolerates the game's original `{name, price}` rows). Pure. |
+| `carData.ts` | Car catalog for the `$$$ Cars` game: `CAR_CATALOG` is the current (`CATALOG_YEAR`) lineup, make → model → trim → base MSRP; `LEGACY_CATALOG` is past-generation trims tagged with the model years each was sold (`from`/`to`) at their price when new. Both hand-curated — no free keyless MSRP feed exists (NHTSA vPIC has makes/models but no prices or trims). The legacy half exists because most of what rolls past isn't new and the trim names are generation-specific: an AMG GT R is not an AMG GT 63. |
+| `carPrice.ts` | `$$$ Cars` domain logic: **year-scoped** cascading make/model/trim lookups (`makeNames`/`modelsForMake`/`trimsForModel` all take a model year — an older year unlocks departed marques and era-correct trims), `catalogMsrp()` (exact hit from whichever table covers the year, or null — never a guess), price tiers with doubling point values (`tierOf`, `scoreFor`), the co-op scoreboard (`teamHaul()`, `HAUL_LEVELS`), `carPriceKey()` cache key, and `parseSighting()` (tolerates the game's original `{name, price}` rows). Pure. |
 | `carPriceLookup.ts` | `$$$ Cars` price resolution: catalog → memory → Supabase `car_price_cache` → `/api/car-price`. Only a catalog miss can reach the network, and only behind an explicit tap. |
 | `packingTags.ts` | Packing auto-tagging: `suggestCategory()` (learned-neighbor + curated-lexicon classifier with typo correction and a confidence score), `detectAssignee()`, `parsePackingEntries()`, `suggestRetags()`, plus the category palette/emoji. Pure and local — no network, no model. |
 | `theme.ts` | Light/dark/system preference, persisted per device. |
@@ -186,11 +186,17 @@ read via `created_by`).
 `$$$ Cars` is structured rather than free-text: a sighting is a year / make /
 model / trim picked from `carData.ts`, and the game prices it itself
 (`lib/carPrice.ts`, `lib/carPriceLookup.ts`) — catalog first, cached Haiku
-lookup only on a miss, manual entry always available as an override. Each
-sighting lands in a price tier worth doubling points, so the scoreboard is
-`scoreFor()` (sum of tier points), not raw dollars. Entries store the
-structured fields plus `msrp`/`source`; `parseSighting()` still reads the
-game's original `{name, price}` rows so old sightings keep ranking.
+lookup only on a miss, manual entry always available as an override. The
+pickers are scoped to the selected model year, so an older year offers the
+marques and trims of that era rather than this year's lineup. It is the one
+**cooperative** game: both phones fill a single shared haul, scored by
+`teamHaul()` — one joint point total, the six price tiers as a collection to
+complete, and the `HAUL_LEVELS` ladder as the thing to play against. Names ride
+along on each row as credit (`AttributionDot`), not as a scoreline, and either
+traveler can remove any row so the passenger can log and fix entries for the
+driver. Entries store the structured fields plus `msrp`/`source`;
+`parseSighting()` still reads the game's original `{name, price}` rows so old
+sightings keep ranking.
 
 ## Free-service etiquette (do not regress this)
 

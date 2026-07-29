@@ -4,7 +4,7 @@ import { verifyTraveler } from "@/lib/server/auth";
 
 /**
  * MSRP lookup for the "$$$ Cars" game — the fallback for cars the offline
- * 2026 catalog in `lib/carData.ts` can't price (an older model year, an
+ * catalog in `lib/carData.ts` can't price (a year it doesn't cover, an
  * unlisted make/model/trim).
  *
  * Deliberately the cheapest thing that works: Haiku, a ~120-token system

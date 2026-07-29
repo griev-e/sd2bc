@@ -3,17 +3,28 @@
  *
  * Two halves:
  *  - the catalog side: cascading make → model → trim lookups over `carData.ts`
- *    and the exact-MSRP hit that makes the common case free and instant.
- *  - the ranking side: an MSRP lands in a price tier, and each tier is worth
- *    points, so a sighting is *ranked*, not just listed. Beating your partner
- *    means finding rarer metal, not logging more Corollas.
+ *    and the exact-MSRP hit that makes the common case free and instant. Every
+ *    lookup is scoped to a model year: the current lineup answers for
+ *    CATALOG_YEAR, the legacy table answers for the years each trim was sold.
+ *  - the scoring side: an MSRP lands in a price tier, and each tier is worth
+ *    points. The game is **cooperative** — the two of you are filling one
+ *    shared haul, so the tiers are a collection to complete and the points are
+ *    a joint total, not a duel.
  *
- * Anything the catalog can't price (an older model year, an off-catalog car)
- * gets resolved by the cached Haiku lookup behind `api/car-price`; `carPriceKey`
- * is the shared cache key for that path.
+ * Anything the catalog can't price (a car older than the legacy table, an
+ * off-catalog model) gets resolved by the cached Haiku lookup behind
+ * `api/car-price`; `carPriceKey` is the shared cache key for that path.
  */
 
-import { CAR_CATALOG, CATALOG_YEAR, type CarMake, type CarModel } from "./carData";
+import {
+  CAR_CATALOG,
+  CATALOG_YEAR,
+  LEGACY_CATALOG,
+  type CarMake,
+  type CarModel,
+  type CarTrim,
+  type LegacyModel,
+} from "./carData";
 
 /** One logged sighting, as stored in a `cars` game event's `value`. */
 export interface CarSighting {
@@ -70,11 +81,89 @@ export function pointsFor(msrp: number): number {
 }
 
 /**
- * A player's score: the points of every car they logged. Summed rather than
- * maxed so a steady stream of good finds competes with one lucky Lambo.
+ * The haul's score: the points of every car logged, whoever spotted it.
+ * Summed rather than maxed so a steady stream of good finds still adds up
+ * next to one lucky Lambo.
  */
 export function scoreFor(sightings: { msrp: number }[]): number {
   return sightings.reduce((sum, s) => sum + pointsFor(s.msrp), 0);
+}
+
+export interface HaulLevel {
+  /** Points needed to reach this level. */
+  at: number;
+  label: string;
+}
+
+/**
+ * Shared goalposts for the trip. Cooperative games need something to play
+ * *against* once you've stopped playing against each other, so the two of you
+ * are climbing this ladder together — the spacing roughly doubles, matching
+ * the tier points, so a level always costs a handful of good spots.
+ */
+export const HAUL_LEVELS: HaulLevel[] = [
+  { at: 0, label: "Parking lot" },
+  { at: 20, label: "Onramp" },
+  { at: 50, label: "Fast lane" },
+  { at: 110, label: "Canyon run" },
+  { at: 240, label: "Cars & Coffee" },
+  { at: 500, label: "Pebble Beach" },
+];
+
+/** How the pair is doing in one tier — the collection board's row. */
+export interface TierProgress<T> {
+  tier: TierMeta;
+  count: number;
+  /** Priciest car the two of you logged in this tier, or null if none yet. */
+  best: T | null;
+}
+
+export interface TeamHaul<T> {
+  points: number;
+  count: number;
+  /** Richest tier first, same order as TIERS — the six-slot collection. */
+  tiers: TierProgress<T>[];
+  /** How many of the six tiers have at least one sighting. */
+  collected: number;
+  level: HaulLevel;
+  /** The level being climbed toward, or null once the ladder is topped out. */
+  next: HaulLevel | null;
+  /** 0–1 through the current level; 1 at the top of the ladder. */
+  progress: number;
+}
+
+/**
+ * The whole cooperative scoreboard in one pass: joint points, the tier
+ * collection, and where the pair sits on the level ladder. Generic over the
+ * sighting so callers keep whatever they attached to it (who spotted it, when)
+ * on the `best` car.
+ */
+export function teamHaul<T extends { msrp: number }>(sightings: T[]): TeamHaul<T> {
+  const points = scoreFor(sightings);
+
+  const tiers = TIERS.map((tier) => {
+    const inTier = sightings.filter((s) => tierOf(s.msrp).id === tier.id);
+    return {
+      tier,
+      count: inTier.length,
+      best: inTier.reduce<T | null>((b, s) => (!b || s.msrp > b.msrp ? s : b), null),
+    };
+  });
+
+  // HAUL_LEVELS is cheapest-first, so the last threshold cleared is the level.
+  const reached = HAUL_LEVELS.filter((l) => points >= l.at);
+  const level = reached[reached.length - 1] ?? HAUL_LEVELS[0];
+  const next = HAUL_LEVELS[reached.length] ?? null;
+
+  return {
+    points,
+    count: sightings.length,
+    tiers,
+    collected: tiers.filter((t) => t.count > 0).length,
+    level,
+    next,
+    progress: next ? (points - level.at) / (next.at - level.at) : 1,
+  };
 }
 
 /**
@@ -88,10 +177,6 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-export function makeNames(): string[] {
-  return CAR_CATALOG.map((m) => m.name);
-}
-
 function findMake(make: string): CarMake | undefined {
   const want = norm(make);
   return CAR_CATALOG.find((m) => norm(m.name) === want);
@@ -102,18 +187,81 @@ function findModel(make: string, model: string): CarModel | undefined {
   return findMake(make)?.models.find((m) => norm(m.name) === want);
 }
 
-export function modelsForMake(make: string): CarModel[] {
-  return findMake(make)?.models ?? [];
+function findLegacyModel(make: string, model: string): LegacyModel | undefined {
+  const wantMake = norm(make);
+  const wantModel = norm(model);
+  return LEGACY_CATALOG.find((m) => norm(m.name) === wantMake)?.models.find(
+    (m) => norm(m.name) === wantModel,
+  );
 }
 
-export function trimsForModel(make: string, model: string): { name: string; msrp: number }[] {
-  return findModel(make, model)?.trims ?? [];
+/** Legacy trims of one model that were on sale in `year`, cheapest first. */
+function legacyTrims(make: string, model: string, year: number): CarTrim[] {
+  return (findLegacyModel(make, model)?.trims ?? [])
+    .filter((t) => year >= t.from && year <= t.to)
+    .map(({ name, msrp }) => ({ name, msrp }));
+}
+
+/** Merge two name-keyed lists, keeping the first spelling of any duplicate. */
+function mergeByName<T extends { name: string }>(first: T[], second: T[]): T[] {
+  const seen = new Set(first.map((x) => norm(x.name)));
+  return [...first, ...second.filter((x) => !seen.has(norm(x.name)))];
 }
 
 /**
- * Exact catalog MSRP, or null when the catalog can't answer — a different
- * model year, an unlisted make/model, or a trim we don't carry. Null is the
- * signal to fall back to the AI lookup; it is never a guess.
+ * Makes to offer for a model year. The current lineup always shows; picking an
+ * older year also unlocks the marques that no longer exist (Pontiac, Saturn,
+ * Saab…), which is exactly when you need them.
+ */
+export function makeNames(year: number = CATALOG_YEAR): string[] {
+  const current = CAR_CATALOG.map((m) => m.name);
+  if (year === CATALOG_YEAR) return current;
+  return mergeByName(
+    current.map((name) => ({ name })),
+    LEGACY_CATALOG.map((m) => ({ name: m.name })),
+  )
+    .map((m) => m.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Models for a make in a given year: the current lineup, plus any nameplate
+ * the legacy table sold that year. Current models aren't filtered by year —
+ * the table carries no "on sale since" for them — so an old year lists a few
+ * cars that didn't exist yet. Harmless: the picker is a search box, and a
+ * wrong pick just falls through to the AI lookup instead of a catalog price.
+ */
+export function modelsForMake(make: string, year: number = CATALOG_YEAR): CarModel[] {
+  const current = findMake(make)?.models ?? [];
+  if (year === CATALOG_YEAR) return current;
+  const legacy = (LEGACY_CATALOG.find((m) => norm(m.name) === norm(make))?.models ?? [])
+    .filter((m) => m.trims.some((t) => year >= t.from && year <= t.to))
+    .map((m) => ({ name: m.name, trims: legacyTrims(make, m.name, year) }));
+  return mergeByName(current, legacy).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Trims to offer for one model in one year. Era-correct trims lead — an
+ * AMG GT R belongs at the top of a 2019 AMG GT, not buried under this year's
+ * GT 43/55/63 — with the current lineup's names appended after them, since a
+ * recent-but-not-current car (a 2023 C 300) still wears them.
+ */
+export function trimsForModel(
+  make: string,
+  model: string,
+  year: number = CATALOG_YEAR,
+): CarTrim[] {
+  const current = findModel(make, model)?.trims ?? [];
+  if (year === CATALOG_YEAR) return current;
+  return mergeByName(legacyTrims(make, model, year), current);
+}
+
+/**
+ * Exact catalog MSRP, or null when neither table can answer — a year older
+ * than the legacy table covers, an unlisted make/model, or a trim we don't
+ * carry. Null is the signal to fall back to the AI lookup; it is never a
+ * guess. Legacy prices are what the car cost new that year, which is the
+ * fairest way to rank a 2004 Viper against a 2026 Corvette.
  */
 export function catalogMsrp(
   year: number,
@@ -121,14 +269,16 @@ export function catalogMsrp(
   model: string,
   trim: string,
 ): number | null {
-  if (year !== CATALOG_YEAR) return null;
-  const found = findModel(make, model);
-  if (!found) return null;
+  const trims =
+    year === CATALOG_YEAR
+      ? (findModel(make, model)?.trims ?? [])
+      : legacyTrims(make, model, year);
+  if (trims.length === 0) return null;
   const want = norm(trim);
   // No trim given → the model's entry price, which is what "a 2026 RAV4"
   // means to someone who only caught a glimpse from the next lane.
-  if (!want) return found.trims[0]?.msrp ?? null;
-  return found.trims.find((t) => norm(t.name) === want)?.msrp ?? null;
+  if (!want) return trims[0]?.msrp ?? null;
+  return trims.find((t) => norm(t.name) === want)?.msrp ?? null;
 }
 
 /**

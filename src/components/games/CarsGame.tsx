@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import AttributionDot from "@/components/Attribution";
 import { IconChevronDown, IconCrown, IconSearch, IconX } from "@/components/Icons";
-import { fmtMoney } from "@/lib/format";
+import { displayName, fmtMoney } from "@/lib/format";
 import { riseIn, SPRING } from "@/lib/motion";
 import { useTrip } from "@/lib/store";
 import { CATALOG_YEAR, MIN_YEAR } from "@/lib/carData";
@@ -17,16 +17,18 @@ import {
   modelsForMake,
   parseSighting,
   pointsFor,
-  scoreFor,
   sightingLabel,
+  teamHaul,
   tierOf,
   trimsForModel,
   yearOptions,
   type CarSighting,
   type PriceTier,
+  type TeamHaul,
 } from "@/lib/carPrice";
 import { resolveCarPrice, UnknownCarError, type PriceResult } from "@/lib/carPriceLookup";
-import { ScoreStrip, useGameEvents, usePlayers } from "./shared";
+import type { Profile } from "@/lib/types";
+import { useGameEvents, usePlayers } from "./shared";
 
 /**
  * Tier → design tokens. Written out rather than derived from the tier id,
@@ -50,10 +52,16 @@ interface LoggedCar extends CarSighting {
 
 /**
  * "$$$ Cars" — log what rolled past by year / make / model / trim and the game
- * prices it. The 2026 catalog answers instantly and for free; anything it
- * doesn't cover (an older car, something exotic) goes to the cached Haiku
- * lookup behind a deliberate tap. Each sighting lands in a price tier worth
- * points, so the scoreboard rewards rare metal over sheer volume.
+ * prices it. The catalog answers instantly and for free (this year's lineup
+ * plus the past-generation trims in `carData.ts`); anything it doesn't cover
+ * goes to the cached Haiku lookup behind a deliberate tap.
+ *
+ * It's a **co-op**: both phones fill one shared haul. Every sighting adds to a
+ * joint total, the six price tiers are a collection to complete, and the pair
+ * climbs the `HAUL_LEVELS` ladder together — so passing the phone to whoever
+ * has a free hand costs nothing, and calling out a Lambo for the driver to log
+ * is the same as logging it yourself. Names still ride along on each row, but
+ * as credit rather than a score.
  */
 export default function CarsGame() {
   const events = useGameEvents("cars");
@@ -88,8 +96,14 @@ export default function CarsGame() {
     [events],
   );
 
-  const models = useMemo(() => modelsForMake(make).map((m) => m.name), [make]);
-  const trims = useMemo(() => trimsForModel(make, model).map((t) => t.name), [make, model]);
+  // The pickers are year-scoped: an older year unlocks the marques and
+  // generation-specific trims that aren't in this year's lineup.
+  const makes = useMemo(() => makeNames(year), [year]);
+  const models = useMemo(() => modelsForMake(make, year).map((m) => m.name), [make, year]);
+  const trims = useMemo(
+    () => trimsForModel(make, model, year).map((t) => t.name),
+    [make, model, year],
+  );
 
   // The catalog is a pure lookup over the current selection — free, instant,
   // and the answer for the overwhelming majority of sightings.
@@ -162,21 +176,24 @@ export default function CarsGame() {
     setManual("");
   }
 
-  const myScore = scoreFor(cars.filter((c) => c.by === me?.id));
-  const theirScore = scoreFor(cars.filter((c) => c.by === partner?.id));
+  const haul = useMemo(() => teamHaul(cars), [cars]);
+  const mineCount = cars.filter((c) => c.by === me?.id).length;
+  const theirCount = cars.filter((c) => partner && c.by === partner.id).length;
   const best = cars[0] ?? null;
 
   return (
     <div className="space-y-3.5">
-      <ScoreStrip
+      <HaulPanel
+        haul={haul}
         me={me}
         partner={partner}
-        mine={myScore}
-        theirs={theirScore}
-        unit="points"
+        mineCount={mineCount}
+        theirCount={theirCount}
       />
 
-      {/* best find so far — the thing worth bragging about */}
+      <TierBoard haul={haul} />
+
+      {/* best find so far — the thing the two of you brag about together */}
       {best && (
         <motion.section {...riseIn()} className="card flex items-center gap-3 p-4">
           <span className="text-2xl leading-none">{tierOf(best.msrp).emoji}</span>
@@ -190,7 +207,7 @@ export default function CarsGame() {
 
       {/* log a sighting */}
       <section className="card space-y-2.5 p-4">
-        <p className="eyebrow px-1">Spotted something fancy?</p>
+        <p className="eyebrow px-1">Add to the haul</p>
 
         {/* year — a scroller, since it's almost always the newest few */}
         <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
@@ -212,7 +229,7 @@ export default function CarsGame() {
         <Picker
           label="Make"
           value={make}
-          options={makeNames()}
+          options={makes}
           onChange={(v) => {
             setMake(v);
             setModel("");
@@ -244,7 +261,12 @@ export default function CarsGame() {
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
                 <p className="eyebrow">
-                  MSRP · {price.source === "catalog" ? "2026 catalog" : "AI estimate"}
+                  MSRP ·{" "}
+                  {price.source === "catalog"
+                    ? year === CATALOG_YEAR
+                      ? `${CATALOG_YEAR} catalog`
+                      : `${year} price when new`
+                    : "AI estimate"}
                   {price.source === "ai" && price.confidence !== "high"
                     ? ` · ${price.confidence} confidence`
                     : ""}
@@ -263,7 +285,7 @@ export default function CarsGame() {
               <p className="flex-1 text-[13px] text-fg-muted">
                 {!make || !model
                   ? "Pick a make and model."
-                  : `Not in the ${CATALOG_YEAR} catalog — look it up or type a price.`}
+                  : `No ${year} price in the catalog — look it up or type one.`}
               </p>
               <button
                 onClick={lookUpPrice}
@@ -297,10 +319,10 @@ export default function CarsGame() {
         </div>
       </section>
 
-      {/* leaderboard */}
+      {/* the haul, priciest first — one shared list, not two columns */}
       {cars.length === 0 ? (
         <p className="py-6 text-center text-sm text-fg-muted">
-          No sightings yet — keep your eyes on the fast lane.
+          Nothing in the haul yet — keep your eyes on the fast lane.
         </p>
       ) : (
         <section className="card p-4">
@@ -330,22 +352,138 @@ export default function CarsGame() {
                   </p>
                 </div>
                 <p className="tnum text-sm font-bold">{fmtMoney(car.msrp)}</p>
+                {/* who called it — credit on a shared haul, not a scoreline */}
                 <AttributionDot userId={car.by} size={16} />
-                {car.by === me?.id && (
-                  <button
-                    onClick={() => void deleteGameEvent(car.id)}
-                    aria-label="Remove entry"
-                    className="pressable -mr-1 flex h-8 w-7 items-center justify-center text-fg-faint"
-                  >
-                    <IconX size={11} />
-                  </button>
-                )}
+                {/* either traveler can fix either row: the passenger logs for
+                    the driver, so the passenger has to be able to undo it too */}
+                <button
+                  onClick={() => void deleteGameEvent(car.id)}
+                  aria-label="Remove entry"
+                  className="pressable -mr-1 flex h-8 w-7 items-center justify-center text-fg-faint"
+                >
+                  <IconX size={11} />
+                </button>
               </div>
             ))}
           </div>
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * The co-op scoreboard: one joint total and the rung of `HAUL_LEVELS` the two
+ * of you have climbed to. The per-person counts sit underneath as an addition
+ * — who called what is fun to see, but it doesn't add up to a winner.
+ */
+function HaulPanel({
+  haul,
+  me,
+  partner,
+  mineCount,
+  theirCount,
+}: {
+  haul: TeamHaul<LoggedCar>;
+  me: Profile | null;
+  partner: Profile | null;
+  mineCount: number;
+  theirCount: number;
+}) {
+  return (
+    <section className="card p-4">
+      <div className="flex items-baseline justify-between">
+        <p className="tnum text-2xl font-bold leading-none">
+          {haul.points}
+          <span className="text-sm font-semibold text-fg-faint"> pts</span>
+        </p>
+        <p className="eyebrow">{haul.level.label}</p>
+      </div>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-fg/5">
+        {/* scaleX instead of width — transform-only, springs smoothly */}
+        <motion.div
+          initial={false}
+          animate={{ scaleX: Math.min(1, Math.max(0, haul.progress)) }}
+          transition={SPRING}
+          className="h-full w-full origin-left rounded-full"
+          style={{ background: "var(--accent-gradient)" }}
+        />
+      </div>
+      <p className="tnum mt-2 text-[11px] text-fg-muted">
+        {haul.next
+          ? `${haul.next.at - haul.points} pts to ${haul.next.label}`
+          : "Top of the ladder — keep them coming."}
+      </p>
+
+      <div className="mt-3 flex items-center gap-2 border-t border-hairline pt-3">
+        <Contribution profile={me} count={mineCount} fallback="you" />
+        <span className="text-[11px] text-fg-faint">+</span>
+        <Contribution profile={partner} count={theirCount} fallback="them" />
+        <p className="tnum ml-auto text-[11px] text-fg-faint">
+          {haul.count} spotted together
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function Contribution({
+  profile,
+  count,
+  fallback,
+}: {
+  profile: Profile | null;
+  count: number;
+  fallback: string;
+}) {
+  return (
+    <span className="flex items-center gap-1.5 text-[11px] font-semibold">
+      <span
+        className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
+        style={{ background: profile?.color ?? "var(--fg-faint)" }}
+      />
+      <span className="tnum">{count}</span>
+      <span className="text-fg-muted">{displayName(profile) ?? fallback}</span>
+    </span>
+  );
+}
+
+/**
+ * The shared collection: one slot per price tier, cheapest first, lit once
+ * either of you has bagged something in it. This is the co-op goal that isn't
+ * just "a bigger number" — a Bugatti nobody can find is worth as much to the
+ * board as the Kia neither of you bothered to log.
+ */
+function TierBoard({ haul }: { haul: TeamHaul<LoggedCar> }) {
+  return (
+    <section className="card p-4">
+      <div className="flex items-baseline justify-between">
+        <p className="eyebrow">Tier collection</p>
+        <p className="tnum text-[11px] text-fg-faint">
+          {haul.collected} / {haul.tiers.length}
+        </p>
+      </div>
+      {/* TIERS is richest-first; reversed here so it reads as a ladder up */}
+      <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+        {[...haul.tiers].reverse().map(({ tier, count }) => (
+          <div
+            key={tier.id}
+            className={`flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center ${
+              count > 0 ? TIER_CLASS[tier.id] : "bg-fg/[0.03] text-fg-faint"
+            }`}
+          >
+            <span className={`text-base leading-none ${count > 0 ? "" : "opacity-40"}`}>
+              {tier.emoji}
+            </span>
+            <span className="text-[10px] font-semibold leading-tight">{tier.label}</span>
+            <span className="tnum text-[10px] leading-none opacity-70">
+              {count > 0 ? `×${count}` : `${tier.points} pt${tier.points > 1 ? "s" : ""}`}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
