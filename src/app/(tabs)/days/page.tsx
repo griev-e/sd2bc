@@ -257,16 +257,26 @@ function DayCard({
 
   // Hand this day's drive to a nav app: last night's stay (if any) through
   // every stop in order. One keyless universal link per app — see lib/directions.
-  const navOptions = useMemo(() => {
+  // Names ride alongside the points so the sheet can name the place each app
+  // will actually reach; only Google follows the whole list.
+  const nav = useMemo(() => {
     const points: LngLat[] = [];
+    const names: string[] = [];
     if (prevDay) {
       const prevStops = stopsForDay(stops, prevDay.id);
       const origin = prevStops[prevStops.length - 1];
-      if (origin) points.push([origin.lng, origin.lat]);
+      if (origin) {
+        points.push([origin.lng, origin.lat]);
+        names.push(origin.name);
+      }
     }
-    for (const s of dayStops) points.push([s.lng, s.lat]);
-    return directionsOptions(points);
+    for (const s of dayStops) {
+      points.push([s.lng, s.lat]);
+      names.push(s.name);
+    }
+    return { options: directionsOptions(points), names };
   }, [prevDay, stops, dayStops]);
+  const navOptions = nav.options;
 
   // When the day's first stop has an ETA, back out when to leave last night's
   // stay to make it — the departure we never show as its own stop.
@@ -483,6 +493,7 @@ function DayCard({
       <NavAppSheet
         title={`Navigate ${day.title || `Day ${day.seq}`}`}
         options={navOptions}
+        names={nav.names}
         open={navOpen}
         onClose={() => setNavOpen(false)}
       />

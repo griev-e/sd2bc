@@ -89,7 +89,7 @@ src/
 | `tiles.ts` | Slippy-map tile math for the offline map download: which tiles a route corridor touches at each zoom, plus style/sprite/glyph URL extraction. Pure. |
 | `offlineMaps.ts` | Drives the "Download maps for this trip" run (Zustand): resolves both styles, plans tiles, fetches them through the service worker on a 6-wide pool. |
 | `budget.ts` | `computeBudget()` — the whole cost forecast as one pure function, shared by the Budget tab and the AI analyzer. |
-| `directions.ts` | Keyless Google Maps directions deep link for a day's drive. |
+| `directions.ts` | Keyless nav deep links for a day's drive. **Only Google Maps can take a multi-stop day in a URL** — Apple's `daddr` is a single destination point and Waze has no waypoint parameter, so those two get the *next* stop and say so. Never chain Apple's `daddr` with `+to:`: that's the classic Google syntax, Apple doesn't parse it, and `+` decodes to a space so Apple geocodes the whole run-on string as one bogus address. |
 | `ics.ts` | Client-side iCalendar export of the itinerary (one all-day event per day). |
 | `server/auth.ts` | Server-only `verifyTraveler()` — Bearer-token gate for `/api/analyze` and `/api/overpass`. |
 | `osrm.ts` | `fetchRoute()` with memory → Supabase `route_cache` → network. Durations are calibrated (`DRIVE_TIME_CALIBRATION`, −10%) on the way out — the OSRM demo runs slow vs. Apple/Google — while `route_cache` always stores raw OSRM values. |

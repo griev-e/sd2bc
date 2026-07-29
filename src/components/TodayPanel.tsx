@@ -101,8 +101,8 @@ export default function TodayPanel() {
   // faster than we want to re-render for) and builds three URLs — the same
   // trade the map page makes for its "next stop" chip. Each slow tick above
   // re-renders us, so the origin stays roughly current without subscribing.
-  const navOptions = (() => {
-    if (!next || !view) return [];
+  const nav = (() => {
+    if (!next || !view) return { options: [], names: [] as string[] };
     const dayStops = stopsForDay(stops, view.day.id);
     const idx = dayStops.findIndex((s) => s.id === next.id);
     const fix = locStatus === "live" ? useLocation.getState().fix : null;
@@ -111,8 +111,13 @@ export default function TodayPanel() {
       : idx > 0
         ? [dayStops[idx - 1].lng, dayStops[idx - 1].lat]
         : null;
-    return origin ? directionsOptions([origin, [next.lng, next.lat]]) : [];
+    if (!origin) return { options: [], names: [] as string[] };
+    return {
+      options: directionsOptions([origin, [next.lng, next.lat]]),
+      names: [fix ? "Here" : (dayStops[idx - 1]?.name ?? "Here"), next.name],
+    };
   })();
+  const navOptions = nav.options;
 
   const nextWeather = useMemo(() => {
     if (!next || !view) return undefined;
@@ -279,9 +284,9 @@ export default function TodayPanel() {
       <NavAppSheet
         title={next ? `Navigate to ${next.name}` : "Navigate"}
         options={navOptions}
+        names={nav.names}
         open={navOpen}
         onClose={() => setNavOpen(false)}
-        singleStop
       />
     </motion.section>
   );
