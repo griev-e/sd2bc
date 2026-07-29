@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { dayRoutePoints, nextStopSeq, routeGeometryChanged, shiftDate, sortDays } from "./store";
-import { bySeq, type Day, type Stop, type ViaPoint } from "./types";
+import {
+  dayRoutePoints,
+  nextStopSeq,
+  pruneRoutes,
+  routeGeometryChanged,
+  shiftDate,
+  sortDays,
+} from "./store";
+import { bySeq, type Day, type DayRoute, type Stop, type ViaPoint } from "./types";
 
 function makeDay(id: string, seq: number): Day {
   return {
@@ -11,6 +18,7 @@ function makeDay(id: string, seq: number): Day {
     title: "",
     notes: "",
     emoji: null,
+    start_time: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
@@ -28,6 +36,7 @@ function makeStop(id: string, day_id: string, seq: number, lat: number, lng: num
     kind: "stop",
     is_overnight: false,
     notes: "",
+    address: null,
     lodging_url: null,
     lodging_free: false,
     lodging_cost: null,
@@ -228,5 +237,36 @@ describe("routeGeometryChanged", () => {
       routeGeometryChanged("via_points", "UPDATE", { ...via, after_stop_id: "stopB" }, [via]),
     ).toBe(true);
     expect(routeGeometryChanged("via_points", "UPDATE", { ...via, lat: 33 }, [via])).toBe(true);
+  });
+});
+
+describe("pruneRoutes", () => {
+  function route(dayId: string, distanceM: number): DayRoute {
+    return { dayId, coordinates: [], segments: [], distanceM, durationS: 100 };
+  }
+
+  it("drops routes for days that no longer exist", () => {
+    const routes = { d1: route("d1", 100), d2: route("d2", 200), d3: route("d3", 300) };
+    const kept = pruneRoutes(routes, [makeDay("d1", 1), makeDay("d3", 2)]);
+    expect(Object.keys(kept).sort()).toEqual(["d1", "d3"]);
+    // the surviving entries are the very same objects — no needless rerenders
+    expect(kept.d1).toBe(routes.d1);
+  });
+
+  it("keeps the trip total honest after a day is removed", () => {
+    const routes = { d1: route("d1", 100), gone: route("gone", 900) };
+    const total = (r: Record<string, DayRoute>) =>
+      Object.values(r).reduce((sum, x) => sum + x.distanceM, 0);
+    expect(total(routes)).toBe(1000);
+    expect(total(pruneRoutes(routes, [makeDay("d1", 1)]))).toBe(100);
+  });
+
+  it("is a no-op when every day is still there", () => {
+    const routes = { d1: route("d1", 100) };
+    expect(pruneRoutes(routes, [makeDay("d1", 1)])).toEqual(routes);
+  });
+
+  it("empties out when every day is gone", () => {
+    expect(pruneRoutes({ d1: route("d1", 100) }, [])).toEqual({});
   });
 });

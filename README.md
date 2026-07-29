@@ -27,8 +27,19 @@ phones, progressive cost forecasting — built on entirely free, keyless service
 - **Custom route shaping** — tap the route line to drop an invisible shaping
   point, drag it onto the road you want (Hwy 1 over I-5), OSRM re-routes through
   it. Tap the dot to remove. Shaping points never appear in the itinerary.
+- **Today** — while the trip is underway, a panel above the itinerary answers
+  the four questions that matter in the car: what's next and when you're due,
+  how much is left to drive, where you're sleeping, and — with the live blip on
+  — how far ahead of or behind schedule you're running. One tap hands the next
+  stop to a nav app.
 - **Itinerary** — 15 seeded days, drag-and-drop stop reordering (touch-friendly),
   per-segment miles + drive time, arrival estimates, overnight flags, notes.
+  Each day has its own departure time (tap "Depart …"); a pinned stop time still
+  outranks it, and the sheet says so instead of offering a control that does
+  nothing.
+- **Fuel range** — the app knows your MPG, your tank, and every leg's real road
+  miles, so it flags the stretches that outrun a tank (holding back 15%, so the
+  warning beats the low-fuel light). Marking a stop as Fuel clears the warning.
 - **Long-press the map** to add a real stop anywhere; **"Suggest nearby"** pulls
   food / gas / viewpoints / beaches / lodging along the day's route corridor.
 - **Budget** — a live forecast seeded from 2026 regional averages (gas $/gal per
@@ -51,6 +62,10 @@ phones, progressive cost forecasting — built on entirely free, keyless service
   with optimistic updates (last-write-wins).
 - **Two accounts max** — enforced in the signup edge function *and* a database
   trigger. Signup UI is username/password; e-mail is synthesized internally.
+- **Offline** — the whole trip is kept on the device in IndexedDB, and
+  **More → Offline** downloads the map along the route so Big Sur, the far
+  Oregon coast and the run north of Vancouver still show the road with no bars.
+  The card reports what's actually stored rather than assuming.
 - **PWA** — add to home screen on iOS; standalone display, safe-area aware,
   dark mode follows the system.
 
@@ -59,6 +74,15 @@ phones, progressive cost forecasting — built on entirely free, keyless service
 ```bash
 npm install
 npm run dev
+```
+
+Checks (also run in CI on every push and PR):
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
 
 Environment variables (optional — safe public defaults are compiled in via
@@ -83,7 +107,8 @@ button surfaces a "not configured" message.
 
 ## Supabase layout
 
-Tables: `profiles`, `trips`, `days`, `stops`, `via_points` (route shaping),
+Tables: `profiles`, `trips` (incl. `mpg`, `tank_gal`), `days` (incl. a per-day
+`start_time`), `stops`, `via_points` (route shaping),
 `packing_items`, `route_cache`, `poi_cache`, `activity_log`, `game_events`,
 `trip_analyses` (AI trip-check cache).
 All tables have RLS (authenticated role only — the app is a private two-person

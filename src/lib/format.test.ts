@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   daysUntil,
   displayName,
+  fmtBytes,
   fmtClock,
   fmtDate,
   fmtDuration,
@@ -130,5 +131,22 @@ describe("displayName", () => {
   it("returns undefined for a missing profile", () => {
     expect(displayName(null)).toBeUndefined();
     expect(displayName(undefined)).toBeUndefined();
+  });
+});
+
+describe("fmtBytes", () => {
+  it("reads in the units a phone's storage settings use", () => {
+    expect(fmtBytes(48_000_000)).toBe("48 MB");
+    expect(fmtBytes(1_400_000_000)).toBe("1.4 GB");
+  });
+
+  it("does not claim 0 MB for a real-but-tiny cache", () => {
+    expect(fmtBytes(400_000)).toBe("<1 MB");
+  });
+
+  it("handles nothing stored, and nonsense", () => {
+    expect(fmtBytes(0)).toBe("0 MB");
+    expect(fmtBytes(-5)).toBe("0 MB");
+    expect(fmtBytes(NaN)).toBe("0 MB");
   });
 });

@@ -1,0 +1,41 @@
+name: CI
+
+# The repo has 350+ unit tests over the domain layer and nothing was running
+# them. Every push and PR now gets lint + typecheck + tests + a production
+# build — the same four commands CLAUDE.md asks for before pushing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR makes the in-flight run irrelevant — don't burn minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Last because it's the slowest, and a type error should fail sooner.
+      - name: Build
+        run: npm run build

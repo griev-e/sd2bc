@@ -36,15 +36,29 @@ function stayOf(stop: Stop | undefined): number {
 }
 
 /**
+ * When a day pulls out of wherever it started, in minutes since midnight.
+ *
+ * The day's own `start_time` wins ("Day 6 we're sleeping in, leaving at 11"),
+ * then the app-wide {@link DAY_START_MIN} default. Day one is special: it
+ * leaves from the origin stop itself, so that stop's own time — if it has one —
+ * is the departure and outranks the day's.
+ */
+export function dayDepartMin(day: Day, origin?: Stop): number {
+  if (origin?.start_time != null) return hhmmToMinutes(origin.start_time);
+  if (day.start_time != null) return hhmmToMinutes(day.start_time);
+  return DAY_START_MIN;
+}
+
+/**
  * Build a cascading schedule for the whole trip.
  *
- * Each day starts from a departure clock — the first day honours the origin
- * stop's own time (e.g. "leave home at 8:00"), later days default to
- * {@link DAY_START_MIN}. From there every arrival is derived live from the
- * route's drive times, so when a segment's duration changes the ETA moves with
- * it. A stop's planned stay pushes the *next* stop later, and a stop with its
- * own start_time re-anchors the chain from that point on (a reservation or
- * check-in that the estimate must bend to).
+ * Each day starts from a departure clock — its own `start_time` when set,
+ * otherwise {@link DAY_START_MIN}; the first day also honours the origin stop's
+ * own time (e.g. "leave home at 8:00"). From there every arrival is derived
+ * live from the route's drive times, so when a segment's duration changes the
+ * ETA moves with it. A stop's planned stay pushes the *next* stop later, and a
+ * stop with its own start_time re-anchors the chain from that point on (a
+ * reservation or check-in that the estimate must bend to).
  */
 function computeSchedule(
   orderedDays: Day[],
@@ -65,7 +79,7 @@ function computeSchedule(
       // Day one leaves from the origin itself: its time is a departure, not an
       // arrival — there is no drive before it.
       const origin = dayStops[0];
-      dep = origin.start_time != null ? hhmmToMinutes(origin.start_time) : DAY_START_MIN;
+      dep = dayDepartMin(day, origin);
       result.set(origin.id, {
         arrivalMin: dep,
         departMin: dep,
@@ -74,7 +88,7 @@ function computeSchedule(
     } else {
       // Later days resume from the morning; the first segment drives in from
       // last night's stay.
-      dep = DAY_START_MIN;
+      dep = dayDepartMin(day);
     }
 
     const route = routes[day.id];

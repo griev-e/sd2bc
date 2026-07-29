@@ -10,6 +10,7 @@ import { IconChevronDown } from "@/components/Icons";
 import { EXPENSE_COLOR } from "@/lib/colors";
 import { computeBudget, M_PER_MI } from "@/lib/budget";
 import { CATEGORY_LABEL, CATEGORIES, GAS_PRICE_USD_PER_GAL } from "@/lib/costs";
+import { DEFAULT_TANK_GAL, planFuel } from "@/lib/fuel";
 import { fmtMiles, fmtMoney } from "@/lib/format";
 import { riseIn, SPRING } from "@/lib/motion";
 import { useOrderedDays, useTrip } from "@/lib/store";
@@ -25,8 +26,15 @@ export default function BudgetPage() {
   const [openCat, setOpenCat] = useState<ExpenseCategory | null>(null);
 
   const orderedDays = useOrderedDays();
-  const mpg = trip?.mpg ?? 28;
+  const mpg = Number(trip?.mpg ?? 28);
   const travelers = trip?.travelers ?? 2;
+  const tankGal = Number(trip?.tank_gal ?? DEFAULT_TANK_GAL);
+
+  // How far a tank actually gets us, and where the plan outruns it.
+  const fuel = useMemo(
+    () => planFuel(orderedDays, stops, routes, mpg, tankGal),
+    [orderedDays, stops, routes, mpg, tankGal],
+  );
 
   // The whole forecast comes from one shared function — the AI trip check
   // reads the exact same numbers, so the two can never disagree.
@@ -209,7 +217,7 @@ export default function BudgetPage() {
           </p>
         </motion.section>
 
-        {/* gas assumptions */}
+        {/* gas assumptions + how far a tank goes */}
         <motion.section {...riseIn(2)} className="card p-5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
@@ -219,29 +227,39 @@ export default function BudgetPage() {
                 {GAS_PRICE_USD_PER_GAL.WA} · BC ${GAS_PRICE_USD_PER_GAL.BC} /gal
               </p>
             </div>
-            <div className="flex flex-shrink-0 items-center gap-2">
-              <button
-                onClick={() => trip && void updateTrip({ mpg: Math.max(10, Number(trip.mpg) - 1) })}
-                className="btn-ghost pressable hit-target flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
-                aria-label="Lower MPG"
-              >
-                −
-              </button>
-              <div className="w-12 text-center">
-                <p className="tnum text-lg font-bold leading-none">
-                  {trip ? Number(trip.mpg) : "—"}
-                </p>
-                <p className="eyebrow mt-0.5">mpg</p>
-              </div>
-              <button
-                onClick={() => trip && void updateTrip({ mpg: Math.min(80, Number(trip.mpg) + 1) })}
-                className="btn-ghost pressable hit-target flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
-                aria-label="Raise MPG"
-              >
-                +
-              </button>
-            </div>
+            <Stepper
+              value={mpg}
+              label="mpg"
+              min={10}
+              max={80}
+              onChange={(v) => trip && void updateTrip({ mpg: v })}
+            />
           </div>
+
+          {/* the tank turns those numbers into "can we actually make it" */}
+          <div className="hairline-t mt-4 flex items-center justify-between gap-3 pt-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">Tank</p>
+              <p className="tnum mt-1 text-[11px] leading-4 text-fg-muted">
+                ≈ {fmtMiles(fuel.usableRangeM)} between fill-ups
+              </p>
+            </div>
+            <Stepper
+              value={tankGal}
+              label="gal"
+              min={5}
+              max={60}
+              onChange={(v) => trip && void updateTrip({ tank_gal: v })}
+            />
+          </div>
+
+          <p className="mt-3 text-[11px] leading-4 text-fg-faint">
+            {fuel.warnings.length === 0
+              ? "Every stretch on the route fits inside a tank. Mark a stop as Fuel to plan a fill-up."
+              : `${fuel.warnings.length} stretch${
+                  fuel.warnings.length === 1 ? "" : "es"
+                } outrun a tank — the itinerary flags which. Range holds back 15% so the warning beats the low-fuel light.`}
+          </p>
         </motion.section>
 
         {/* AI trip check — manual analyzer over the same inputs as the forecast */}
@@ -249,6 +267,44 @@ export default function BudgetPage() {
           <TripAnalyzer />
         </motion.div>
       </div>
+    </div>
+  );
+}
+
+/** The +/− control the fuel card uses for both MPG and tank size. */
+function Stepper({
+  value,
+  label,
+  min,
+  max,
+  onChange,
+}: {
+  value: number;
+  label: string;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="flex flex-shrink-0 items-center gap-2">
+      <button
+        onClick={() => onChange(Math.max(min, value - 1))}
+        className="btn-ghost pressable hit-target flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
+        aria-label={`Lower ${label}`}
+      >
+        −
+      </button>
+      <div className="w-12 text-center">
+        <p className="tnum text-lg font-bold leading-none">{value}</p>
+        <p className="eyebrow mt-0.5">{label}</p>
+      </div>
+      <button
+        onClick={() => onChange(Math.min(max, value + 1))}
+        className="btn-ghost pressable hit-target flex h-10 w-10 items-center justify-center rounded-xl text-lg font-semibold"
+        aria-label={`Raise ${label}`}
+      >
+        +
+      </button>
     </div>
   );
 }

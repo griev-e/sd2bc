@@ -77,6 +77,7 @@ function makeDay(id: string, seq: number): Day {
     title: "",
     notes: "",
     emoji: null,
+    start_time: null,
     created_at: "",
     updated_at: "",
   };
@@ -94,6 +95,7 @@ function makeStop(id: string, day_id: string, seq: number, lat: number, lng: num
     kind: "stop",
     is_overnight: false,
     notes: "",
+    address: null,
     lodging_url: null,
     lodging_free: false,
     lodging_cost: null,

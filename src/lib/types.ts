@@ -39,6 +39,8 @@ export interface Trip {
   name: string;
   start_date: string;
   mpg: number;
+  /** Usable tank, US gallons; null = the seed default. Feeds the fuel range check. */
+  tank_gal: number | null;
   travelers: number;
   /** Override for food $/person/day; null = use the regional seed default. */
   food_per_day: number | null;
@@ -57,6 +59,11 @@ export interface Day {
   notes: string;
   /** Custom emoji for the day badge; null = a deterministic nature default. */
   emoji: string | null;
+  /**
+   * When this day pulls out, local "HH:MM" (24h). null = the app's 9:00
+   * default — or, on day one, the origin stop's own start_time.
+   */
+  start_time: string | null;
   created_at: string;
   updated_at: string;
 }
